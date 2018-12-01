@@ -1,5 +1,4 @@
-
-# coding: utf-8
+from collections import defaultdict
 
 
 index_file = "/home/szymon/lingwy/nkjp/nkjp_index.txt"
@@ -350,36 +349,21 @@ rels3 = {'14', '15' # mero/holonymy
 # all relations
 # rels4 is rels2 plus rels3
 
-
-
-## Dealing with some lemmatization quirks of our corpus.
-
-# Some lemmas mapped into lexical unit of "osoba"
-persons = ['ja', 'ty', 'on', 'ona', 'ono', 'my', 'wy', 'oni', 'one', 'siebie', 'kto', 'któż', 'wszyscy']
-skl_words = set(['osoba'
-              if (w in persons)
-              else w
-              for w in skl_words])
-
-def rm_sie(base):
-    if base[-len(' się'):] == ' się':
-        return base[:-len(' się')]
-    else:
-        return base
-
-
-
-rm_sie('rozpłakać się')
-
-
-
+## Dynamic storage of word relations info
 wordnet_xml = etree.parse(pl_wordnet)
 
+# NOTE. Theoretically, we have lex_unit ids and synsets given by annotation, but we want
+# to take into account all possibilities given by raw word forms. Our model will try to
+# **select** the correct lex_unit ids for given form in given context.
+# NOTE 2. We store the bulk of relations in x1 dicts, x2 and x3 store only ones specific to them
 
+# NOTE 3. "lexical units" and "wordids" in fact relate to distinct senses, as per the Wordnet.
 
-from collections import defaultdict
+skl_word_wordids = defaultdict(list) # word -> ids as list
 
-
+skl_wordid_neighbors1 = defaultdict(list) # lemmas
+skl_wordid_neighbors2 = defaultdict(list)
+skl_wordid_neighbors3 = defaultdict(list)
 
 # go from "a => [v1, v2 ... ]" to "v1 => [ a ... ], v2 => [ a ... ] ..."
 def reverse_list_dict(dic):
@@ -390,177 +374,134 @@ def reverse_list_dict(dic):
     return new_dic
 
 
+## Dealing with some lemmatization quirks of our corpus.
+def rm_sie(base):
+    if base[-len(' się'):] == ' się':
+        return base[:-len(' się')]
+    else:
+        return base
+# Some lemmas mapped into lexical unit of "osoba"
+persons = ['ja', 'ty', 'on', 'ona', 'ono', 'my', 'wy', 'oni', 'one', 'siebie', 'kto', 'któż', 'wszyscy']
 
-# NOTE. Theoretically, we have lex_unit ids and synsets given by annotation, but we want
-# to take into account all possibilities given by raw word forms. Our model will try to
-# **select** the correct lex_unit ids for given form in given context.
-# NOTE2. We store the bulk of relations in x1 dicts, x2 and x3 store only ones specific to them
+def add_word_neighborhoods(words):
+    """Add neighbor forms for given words to skl_wordid_neighbors* variables."""
 
-skl_word_wordids = defaultdict(list) # word -> ids as list
-skl_wordid_synsets = defaultdict(list) # to harness synset relations
+    words = set(['osoba' if (w in persons) else w for w in words])
 
-skl_neighbor_syns1 = defaultdict(list) # just for collecting them, synset ids
-skl_neighbor_syns2 = defaultdict(list)
-skl_neighbor_syns3 = defaultdict(list)
-skl_wordid_neighbor_ids1 = defaultdict(list) # just for collecting them
-skl_wordid_neighbor_ids2 = defaultdict(list)
-skl_wordid_neighbor_ids3 = defaultdict(list)
-skl_wordid_neighbors1 = defaultdict(list) # lemmas
-skl_wordid_neighbors2 = defaultdict(list)
-skl_wordid_neighbors3 = defaultdict(list)
+    new_words = set([w for w in words if not w in word_wordids])
 
+    # Prepare the temporary indices.
+    skl_wordid_synsets = defaultdict(list) # to harness synset relations
+    skl_neighbor_syns1 = defaultdict(list) # just for collecting them, synset ids
+    skl_neighbor_syns2 = defaultdict(list)
+    skl_neighbor_syns3 = defaultdict(list)
+    skl_wordid_neighbor_ids1 = defaultdict(list) # just for collecting them
+    skl_wordid_neighbor_ids2 = defaultdict(list)
+    skl_wordid_neighbor_ids3 = defaultdict(list)
 
+    if len(new_words) > 0:
+        ## Collect word ids and synsets for new words.
+        # Wordnet lexical ID's of lemmas present in Składnica.
+        for lex_unit in wordnet_xml.iterfind('lexical-unit'):
+            form = lex_unit.get('name').lower()
+            if form in words or rm_sie(form) in new_words:
+                word_wordids[form].append(lex_unit.get('id'))
 
-# Wordnet lexical ID's of lemmas present in Składnica.
-for lex_unit in wordnet_xml.iterfind('lexical-unit'):
-    form = lex_unit.get('name').lower()
-    if form in skl_words or rm_sie(form) in skl_words:
-        skl_word_wordids[form].append(lex_unit.get('id'))
+        # The r.* dicts are obtained by reversal of their parent dictionary when needed by the neighborhood function.
+        # (reverse dict)
+        rskl_word_wordids = reverse_list_dict(skl_word_wordids) # ids -> words
 
-# Compare words where we have their ids with the whole count
-len(skl_word_wordids), len(skl_words)
+        # !!! From now on, make sure that this dict only contains new_words.
+        rskl_word_wordids = dict([(id, word) for (id, word) in rskl_word_wordids if word in new_words])
 
+        # Get the synsets for new words.
+        for synset in wordnet_xml.iterfind('synset'):
+            for unit in synset.iterfind('unit-id'):
+                unit_word = unit.text.lower()
+                if unit_word in rskl_word_wordids:
+                    skl_wordid_synsets[unit.text.lower()].append(synset.get('id')) # assign synset id to the wordid
 
+        ## Collect lexical relations for new words.
+        for lexrel in wordnet_xml.iterfind('lexicalrelations'):
+            if lexrel.get('parent') in rskl_word_wordids:
+                if lexrel.get('relation') in rels1:
+                    skl_wordid_neighbor_ids1[lexrel.get('parent')].append(lexrel.get('child'))
+                if lexrel.get('relation') in rels2:
+                    skl_wordid_neighbor_ids2[lexrel.get('parent')].append(lexrel.get('child'))
+                if lexrel.get('relation') in rels3:
+                    skl_wordid_neighbor_ids3[lexrel.get('parent')].append(lexrel.get('child'))
+            if lexrel.get('child') in rskl_word_wordids:
+                if lexrel.get('relation') in rels1:
+                    skl_wordid_neighbor_ids1[lexrel.get('child')].append(lexrel.get('parent'))
+                if lexrel.get('relation') in rels2:
+                    skl_wordid_neighbor_ids2[lexrel.get('child')].append(lexrel.get('parent'))
+                if lexrel.get('relation') in rels3:
+                    skl_wordid_neighbor_ids3[lexrel.get('child')].append(lexrel.get('parent'))
 
-# words missing in wordnet
-[w for w in skl_words if not w in skl_word_wordids and not w+' się' in skl_word_wordids][:20]
+        # (reverse dict)
+        rskl_wordid_synsets = reverse_list_dict(skl_wordid_synsets)
 
+        # Get synset relations.  for synrel in wordnet_xml.iterfind('synsetrelations'):
+            if synrel.get('parent') in rskl_wordid_synsets:
+                if synrel.get('relation') in rels1:
+                    skl_neighbor_syns1[synrel.get('child')].append(synrel.get('parent'))
+                if synrel.get('relation') in rels2:
+                    skl_neighbor_syns2[synrel.get('child')].append(synrel.get('parent'))
+                if synrel.get('relation') in rels3:
+                    skl_neighbor_syns3[synrel.get('child')].append(synrel.get('parent'))
+            if synrel.get('child') in rskl_wordid_synsets:
+                if synrel.get('relation') in rels1:
+                    skl_neighbor_syns1[synrel.get('parent')].append(synrel.get('child'))
+                if synrel.get('relation') in rels2:
+                    skl_neighbor_syns2[synrel.get('parent')].append(synrel.get('child'))
+                if synrel.get('relation') in rels3:
+                    skl_neighbor_syns3[synrel.get('parent')].append(synrel.get('child'))
 
+        # Get additional neighbor wordids from neighbor synsets.
+        for synset in wordnet_xml.iterfind('synset'):
+            if synset.get('id') in skl_neighbor_syns1:
+                # for words being in that synset
+                for unit in synset.iterfind('unit-id'):
+                    # for synsets for which we want to collect this one
+                    for target_syns in skl_neighbor_syns1[synset.get('id')]:
+                        # for wordids that are in that other synset - add this wordid from this synset
+                        for receiver in rskl_wordid_synsets[target_syns]:
+                            skl_wordid_neighbor_ids1[receiver].append(unit.text.lower())
+            if synset.get('id') in skl_neighbor_syns2:
+                for unit in synset.iterfind('unit-id'):
+                    for target_syns in skl_neighbor_syns2[synset.get('id')]:
+                        for receiver in rskl_wordid_synsets[target_syns]:
+                            skl_wordid_neighbor_ids2[receiver].append(unit.text.lower())
+            if synset.get('id') in skl_neighbor_syns1:
+                for unit in synset.iterfind('unit-id'):
+                    for target_syns in skl_neighbor_syns3[synset.get('id')]:
+                        for receiver in rskl_wordid_synsets[target_syns]:
+                            skl_wordid_neighbor_ids3[receiver].append(unit.text.lower())
 
-# (reverse dict)
-skl_wordid_words = reverse_list_dict(skl_word_wordids) # ids -> words
+        # (get reverses of these)
+        rskl_wordid_neighbor_ids1 = reverse_list_dict(skl_wordid_neighbor_ids1)
+        skl_neighbor_id_wordids2 = reverse_list_dict(skl_wordid_neighbor_ids2)
+        skl_neighbor_id_wordids3 = reverse_list_dict(skl_wordid_neighbor_ids3)
 
-# Get the synsets.
-for synset in wordnet_xml.iterfind('synset'):
-    for unit in synset.iterfind('unit-id'):
-        if unit.text.lower() in skl_wordid_words:
-            skl_wordid_synsets[unit.text.lower()].append(synset.get('id')) # assign synset id to the wordid
-
-# Distinct wordids with known synsets
-len(skl_wordid_synsets)
-
-
-
-# Get lexical relations.
-for lexrel in wordnet_xml.iterfind('lexicalrelations'):
-    if lexrel.get('parent') in skl_wordid_words:
-        if lexrel.get('relation') in rels1:
-            skl_wordid_neighbor_ids1[lexrel.get('parent')].append(lexrel.get('child'))
-        if lexrel.get('relation') in rels2:
-            skl_wordid_neighbor_ids2[lexrel.get('parent')].append(lexrel.get('child'))
-        if lexrel.get('relation') in rels3:
-            skl_wordid_neighbor_ids3[lexrel.get('parent')].append(lexrel.get('child'))
-    if lexrel.get('child') in skl_wordid_words:
-        if lexrel.get('relation') in rels1:
-            skl_wordid_neighbor_ids1[lexrel.get('child')].append(lexrel.get('parent'))
-        if lexrel.get('relation') in rels2:
-            skl_wordid_neighbor_ids2[lexrel.get('child')].append(lexrel.get('parent'))
-        if lexrel.get('relation') in rels3:
-            skl_wordid_neighbor_ids3[lexrel.get('child')].append(lexrel.get('parent'))
-
-
-
-# Wordids with purely lexical relations
-len(skl_wordid_neighbor_ids1), len(skl_wordid_neighbor_ids2), len(skl_wordid_neighbor_ids3)
-
-
-
-# (reverse dict)
-skl_synset_wordids = reverse_list_dict(skl_wordid_synsets)
-
-
-
-len(skl_synset_wordids)
-
-
-
-# Get synset relations.
-for synrel in wordnet_xml.iterfind('synsetrelations'):
-    if synrel.get('parent') in skl_synset_wordids:
-        if synrel.get('relation') in rels1:
-            skl_neighbor_syns1[synrel.get('child')].append(synrel.get('parent'))
-        if synrel.get('relation') in rels2:
-            skl_neighbor_syns2[synrel.get('child')].append(synrel.get('parent'))
-        if synrel.get('relation') in rels3:
-            skl_neighbor_syns3[synrel.get('child')].append(synrel.get('parent'))
-    if synrel.get('child') in skl_synset_wordids:
-        if synrel.get('relation') in rels1:
-            skl_neighbor_syns1[synrel.get('parent')].append(synrel.get('child'))
-        if synrel.get('relation') in rels2:
-            skl_neighbor_syns2[synrel.get('parent')].append(synrel.get('child'))
-        if synrel.get('relation') in rels3:
-            skl_neighbor_syns3[synrel.get('parent')].append(synrel.get('child'))
-
-
-
-# Synsets with known relations
-len(skl_neighbor_syns1), len(skl_neighbor_syns2), len(skl_neighbor_syns3)
-
-
-
-# Get additional neighbor wordids from neighbor synsets.
-for synset in wordnet_xml.iterfind('synset'):
-    if synset.get('id') in skl_neighbor_syns1:
-        for unit in synset.iterfind('unit-id'):
-            for target_syns in skl_neighbor_syns1[synset.get('id')]:
-                for receiver in skl_synset_wordids[target_syns]:
-                    skl_wordid_neighbor_ids1[receiver].append(unit.text.lower())
-    if synset.get('id') in skl_neighbor_syns2:
-        for unit in synset.iterfind('unit-id'):
-            for target_syns in skl_neighbor_syns2[synset.get('id')]:
-                for receiver in skl_synset_wordids[target_syns]:
-                    skl_wordid_neighbor_ids2[receiver].append(unit.text.lower())
-    if synset.get('id') in skl_neighbor_syns1:
-        for unit in synset.iterfind('unit-id'):
-            for target_syns in skl_neighbor_syns3[synset.get('id')]:
-                for receiver in skl_synset_wordids[target_syns]:
-                    skl_wordid_neighbor_ids3[receiver].append(unit.text.lower())
-
-
-
-# How many wordids have neighbors in total
-len(skl_wordid_neighbor_ids1), len(skl_wordid_neighbor_ids2), len(skl_wordid_neighbor_ids3)
-
-
-
-# (get reverses of these)
-skl_neighbor_id_wordids1 = reverse_list_dict(skl_wordid_neighbor_ids1)
-skl_neighbor_id_wordids2 = reverse_list_dict(skl_wordid_neighbor_ids2)
-skl_neighbor_id_wordids3 = reverse_list_dict(skl_wordid_neighbor_ids3)
-
-
-
-# How many *neighbors* we know
-len(skl_neighbor_id_wordids1), len(skl_neighbor_id_wordids2), len(skl_neighbor_id_wordids3)
-
+        # Finally, harness neighbors by their known wordids.
+        for lex_unit in wordnet_xml.iterfind('lexical-unit'):
+            if lex_unit.get('id') in skl_neighbor_id_wordids1:
+                for receiver in skl_neighbor_id_wordids1[lex_unit.get('id')]: # words "interested" in this neighbor
+                    skl_wordid_neighbors1[receiver].append(lex_unit.get('name').lower())
+            if lex_unit.get('id') in skl_neighbor_id_wordids2:
+                for receiver in skl_neighbor_id_wordids2[lex_unit.get('id')]:
+                    skl_wordid_neighbors2[receiver].append(lex_unit.get('name').lower())
+            if lex_unit.get('id') in skl_neighbor_id_wordids3:
+                for receiver in skl_neighbor_id_wordids3[lex_unit.get('id')]:
+                    skl_wordid_neighbors3[receiver].append(lex_unit.get('name').lower())
 
 
 # free some memory.
-skl_neighbor_syns_wordids1 = None
-skl_neighbor_syns_wordids2 = None
-skl_neighbor_syns_wordids3 = None
-skl_synset_wordids = None
+#skl_neighbor_syns_wordids1 = None
+#skl_neighbor_syns_wordids2 = None
+#skl_neighbor_syns_wordids3 = None
+#rskl_wordid_synsets = None
 
-
-
-# Finally, harness neighbors by their known wordids.
-for lex_unit in wordnet_xml.iterfind('lexical-unit'):
-    if lex_unit.get('id') in skl_neighbor_id_wordids1:
-        for receiver in skl_neighbor_id_wordids1[lex_unit.get('id')]: # words "interested" in this neighbor
-            skl_wordid_neighbors1[receiver].append(lex_unit.get('name').lower())
-    if lex_unit.get('id') in skl_neighbor_id_wordids2:
-        for receiver in skl_neighbor_id_wordids2[lex_unit.get('id')]:
-            skl_wordid_neighbors2[receiver].append(lex_unit.get('name').lower())
-    if lex_unit.get('id') in skl_neighbor_id_wordids3:
-        for receiver in skl_neighbor_id_wordids3[lex_unit.get('id')]:
-            skl_wordid_neighbors3[receiver].append(lex_unit.get('name').lower())
-
-
-
-for word in skl_words:
-    if word in skl_word_wordids:
-        for (n, wid) in enumerate(skl_word_wordids[word]):
-            print(word, wid, skl_wordid_neighbors1[wid])
 
 
 # ## Tests

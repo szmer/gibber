@@ -13,17 +13,57 @@ from keras.layers import Dense, Activation
 from keras.layers import LSTM, Embedding
 from keras.optimizers import SGD
 
-index_file = "/home/szymon/lingwy/nkjp/nkjp_index.txt"
-nkjp_path = "/home/szymon/lingwy/nkjp/pełny/"
-vecs_path = "/home/szymon/lingwy/nkjp/wektory/nkjp+wiki-lemmas-all-100-skipg-ns.txt/"
-vecs_dim = 100
-pl_wordnet = "/home/szymon/lingwy/wielozn/wzięte/plwordnet_2_0_4/plwordnet_2_0_4_release/plwordnet_2_0.xml"
+from resources_conf import nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path
 
+vecs_dim = 100
 window_size = 4 # how many words to condider on both sides of the target
 batch_size = window_size * 2 # for training of gibberish discriminator in Keras
 learning_rate = 0.3
-reg_rate = 0.005
+reg_rate = 0.005 # regularization
 corp_runs = 2 # how many times to feed the whole corpus during training
+
+#
+## Get word vectors
+#
+first_line = True
+word_n = 0
+word_to_idx = {} # ie. indices of vectors
+idx_to_word = {}
+
+# we'll read those from the data file
+vecs_count = 0
+vecs_dim = 100
+
+# Get the vector word labels (we'll get vectors themselves in a moment).
+with open(vecs_path) as vecs_file:
+    for line in vecs_file:
+        if first_line:
+            # Read metadata.
+            vecs_count = int(line.split(' ')[0])
+            vecs_dim = int(line.split(' ')[1])
+            first_line = False
+            continue
+        # Read lemma base forms.
+        word = line.split(' ')[0].lower()
+        word_to_idx[word] = word_n
+        idx_to_word[word_n] = word
+        word_n += 1
+
+word_vecs = np.loadtxt(vecs_path+"data", encoding="utf-8",
+                       dtype=np.float32, # tensorflow's requirement
+                       skiprows=1, usecols=tuple(range(1, vecs_dim+1)))
+
+# Add the dummy boundary/unknown marker.
+word_vecs = np.vstack([word_vecs, np.zeros((1,vecs_dim), dtype=np.float32)])
+vecs_count += 1
+
+# Get the word's vector, or the dummy marker.
+def word_id(word):
+    return word_to_idx[word] if word in word_to_idx else vecs_count-1
+
+#
+## Load or train the model for estimating 'gibberish'.
+#
 
 model = None
 
@@ -38,7 +78,7 @@ else:
     train_sents = []
     rejected_sent_ids = []
 
-    with open(index_file) as index:
+    with open(nkjp_index_path) as index:
         for fragm_id in index:
             fragm_id = fragm_id.strip()
             # tag is namespaced, .// for finding anywhere in the tree
@@ -66,45 +106,6 @@ else:
                     train_sents[-1].append(word)
                     words_count += 1
                     unique_words.add(word)
-
-    words_count
-
-    # ## Get word vectors
-    first_line = True
-    word_n = 0
-    word_to_idx = {} # ie. indices of vectors
-    idx_to_word = {}
-
-    # we'll read those from the data file
-    vecs_count = 0
-    vecs_dim = 100
-
-    # Get the vector word labels (we'll get vectors themselves in a momment).
-    with open(vecs_path+"data") as vecs_file:
-        for line in vecs_file:
-            if first_line:
-                # Read metadata.
-                vecs_count = int(line.split(' ')[0])
-                vecs_dim = int(line.split(' ')[1])
-                first_line = False
-                continue
-            # Read lemma base forms.
-            word = line.split(' ')[0].lower()
-            word_to_idx[word] = word_n
-            idx_to_word[word_n] = word
-            word_n += 1
-
-    word_vecs = np.loadtxt(vecs_path+"data", encoding="utf-8",
-                           dtype=np.float32, # tensorflow's requirement
-                           skiprows=1, usecols=tuple(range(1, vecs_dim+1)))
-
-    # Add the dummy boundary/unknown marker.
-    word_vecs = np.vstack([word_vecs, np.zeros((1,vecs_dim), dtype=np.float32)])
-    vecs_count += 1
-
-    # Get the word's vector, or the dummy marker.
-    def word_id(word):
-        return word_to_idx[word] if word in word_to_idx else vecs_count-1
 
     ### Keras - training the "language/gibberish discriminator"
 
@@ -180,7 +181,7 @@ else:
 ##
 ## Dynamic storage of word relations info
 ##
-wordnet_xml = etree.parse(pl_wordnet)
+wordnet_xml = etree.parse(pl_wordnet_path)
 
 # Relations we're interested in:
 # only hyper/hyponymy, similarity, synonymy

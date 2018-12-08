@@ -3,8 +3,7 @@ import os
 from operator import itemgetter
 from lxml import etree
 
-skladnica_sections_index = "/home/szymon/lingwy/nkjp/skladnica_znacz/sections.txt"
-skladnica_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/"
+from resources_conf import nkjp_index_path, skladnica_sections_index_path, skladnica_path
 
 # ## Get Składnica sentences
 
@@ -19,10 +18,10 @@ skl_nkjp_sent_ids = {}
 # auxiliary, skl_id -> NKJP_id for documents
 nkjp_skl_ids = {}
 
-with open(skladnica_sections_index) as index:
+with open(skladnica_sections_index_path) as index:
     for sec_name in index:
         skl_ids.append(sec_name.strip())
-with open(index_file) as index:
+with open(nkjp_index_path) as index:
     for fragm_id in index:
         fragm_id = fragm_id.strip()
         nkjp_orig_ids.append(fragm_id)

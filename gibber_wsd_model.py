@@ -364,6 +364,9 @@ def fill_sample(lemma, sent, token_id):
                                         if token_id+j+1 < len(sent)
                                         else bound_token_id)
 def predict_sense(token_lemma, sent, token_id):
+    "Return decisions made when using subsets 1, 2, 3, 4 of relations as tuples
+    (probability, sense, sense_count, considered_sense_count) or None's if no decision."
+
     fill_sample(token_lemma, sent, token_id)
     reference_prob = model.predict(sample)[0][0]
 
@@ -411,14 +414,15 @@ def predict_sense(token_lemma, sent, token_id):
         winners1 = [sid for (sid, p) in enumerate(sense_probs1) if p == max(sense_probs1)]
         #print(winners, sense_wordids)
         decision1 = sense_wordids[choice(winners1)]
+        decision1 = (decision1, dict(sense_probs1)[decision1], len(sense_wordids), senses_considered1)
     
     # 2nd subset (1+2)
     if sum([len(x) for x in sense_ngbs2]) > 0: # there's a neighbor for at least one sense
         for (sid, ngbs) in enumerate(sense_ngbs2):
-            if len(ngbs) == 0:
+            if len(ngbs) == 0: # if we have no specific info on this set of relations
                 if sense_ngbcounts1[sid] > 1: # just carry the "1" average
                     sense_probs2[sid] = sense_probs1[sid]
-                    senses_considered2 += 1
+                    senses_considered2 += 1 # it also counts as "considered"
                 continue
             senses_considered2 += 1
             for ngb_word in ngbs:
@@ -431,6 +435,7 @@ def predict_sense(token_lemma, sent, token_id):
             
         winners2 = [sid for (sid, p) in enumerate(sense_probs2) if p == max(sense_probs2)]
         decision2 = sense_wordids[choice(winners2)]
+        decision2 = (decision2, dict(sense_probs2)[decision2], len(sense_wordids), senses_considered2)
            
     # 3rd subset (1+3)
     if sum([len(x) for x in sense_ngbs3]) > 0: # there's a neighbor for at least one sense
@@ -451,6 +456,7 @@ def predict_sense(token_lemma, sent, token_id):
             
         winners3 = [sid for (sid, p) in enumerate(sense_probs3) if p == max(sense_probs3)]
         decision3 = sense_wordids[choice(winners3)]
+        decision3 = (decision3, dict(sense_probs3)[decision3], len(sense_wordids), senses_considered3)
             
     # 4th subset (1+2+3)
     for sid, _ in enumerate(sense_wordids):
@@ -463,5 +469,6 @@ def predict_sense(token_lemma, sent, token_id):
                             / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid] + sense_ngbcounts3[sid]))
     winners4 = [sid for (sid, p) in enumerate(sense_probs4) if p == max(sense_probs4)]
     decision4 = sense_wordids[choice(winners4)]
+    decision4 = (decision4, dict(sense_probs4)[decision4], len(sense_wordids), senses_considered4)
 
-    return (decision1, decision2, decision3, decision4)       
+    return (decision1, decision2, decision3, decision4)

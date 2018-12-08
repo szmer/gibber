@@ -1,9 +1,11 @@
 import os
+from itertools import chain
 
 from operator import itemgetter
 from lxml import etree
 
 from resources_conf import nkjp_index_path, skladnica_sections_index_path, skladnica_path
+from gibber_wsd_model import predict_sense
 
 # ## Get Składnica sentences
 
@@ -105,6 +107,10 @@ for skl_id in skl_ids:
                     sent = [(token, lexical_id) for num, token, lexical_id in sent]
                     skl_sents.append(sent)
 
+#
+# Load all the necessary wordnet data.
+#
+add_word_neighborhoods(set(chain.from_iterable(skl_sents)))
 
 # ## Tests
 
@@ -117,32 +123,208 @@ for skl_id in skl_ids:
 ## b - words where all senses have known neighbors,
 ## uq - no word repetitions
 ## "Good" values will be divided by N to get accuracy.
-a_words_checked = []
-b1_words_checked = []
-b2_words_checked = []
-b3_words_checked = []
-b4_words_checked = []
-num_a = 0
-num_b = 0
-# also, len(words_checked)
-good1a = 0.0
-good1b = 0.0
-good2a = 0.0
-good2b = 0.0
-good3a = 0.0
-good3b = 0.0
-good4a = 0.0
-good4b = 0.0
+words_checked_a = set() # for determining uniqueness
+# If there is one connected sense in the 1st relation set, there is in all the other (which include this set).
+# The b (full coverage) checked word sets are such that if some word is noth in the 1st set, it can be in some
+# of the subsequent ones.
+words_checked_b1 = set()
+words_checked_b2 = set()
+words_checked_b3 = set()
+words_checked_b4 = set()
 
-print('Group 1 (some, all senses present)')
-print(len(a_words_checked), good1a/len(a_words_checked))
-print(len(b1_words_checked), good1a/len(b1_words_checked))
-print('Group 2 (some, all senses present)')
-print(len(a_words_checked), good2a/len(a_words_checked))
-print(len(b2_words_checked), good1a/len(b2_words_checked))
-print('Group 3 (some, all senses present)')
-print(len(a_words_checked), good3a/len(a_words_checked))
-print(len(b3_words_checked), good1a/len(b3_words_checked))
-print('Group 4 (some, all senses present)')
-print(len(a_words_checked), good4a/len(a_words_checked))
-print(len(b4_words_checked), good1a/len(b4_words_checked))
+words_checked_rest = set() # for calculating the total performance
+num_all = 0 # number of all occurences where we have some true sense provided
+
+num_a1 = 0
+num_a2 = 0
+num_a3 = 0
+num_a4 = 0
+num_b1 = 0
+num_b2 = 0
+num_b3 = 0
+num_b4 = 0
+# also, len(words_checked)
+good_a1 = 0.0
+good_b1 = 0.0
+good_a2 = 0.0
+good_b2 = 0.0
+good_a3 = 0.0
+good_b3 = 0.0
+good_a4 = 0.0
+good_b4 = 0.0
+good_a1_uq = 0.0
+good_b1_uq = 0.0
+good_a2_uq = 0.0
+good_b2_uq = 0.0
+good_a3_uq = 0.0
+good_b3_uq = 0.0
+good_a4_uq = 0.0
+good_b4_uq = 0.0
+
+##
+## Collect model decisions for all subsets of relations, counting correct decisions.
+##
+
+for sent in skl_sents:
+    for (tid, token_data) in enumerate(sent):
+        lemma, true_sense = token_data[0], token_data[1]
+        if true_sense is None:
+            continue
+
+        fill_sample(lemma, sent, tid)
+        decision1, decision2, decision3, decision4 = predict_sense(lemma, sent, tid)
+
+        num_all += 1
+        if [None, None, None, None] == [decision1, decision2, decision3, decision4]:
+            words_checked_rest.add(lemma)
+        
+        new_word = False
+
+        if decision1 is not None:
+            prob, sense_id, senses_count, considered_sense_count = decision1
+            
+            # Increase occurence counts.
+            num_a1 += 1
+            if senses_count == considered_sense_count:
+                num_b1 += 1
+
+            # Correct?
+            if sense_id == true_sense:
+                good_a1 += 1
+                if senses_count == considered_sense_count:
+                    good_b1 += 1
+
+            # Unique word indication.
+            if not lemma in words_checked_a:
+                word_checked_a.add(lemma)
+                new_word = True
+
+                if senses_count == considered_sense_count:
+                    words_checked_b1.add(lemma) # marked as checked with all info on all senses
+
+                if sense_id == true_sense:
+                    good_a1_uq += 1
+                    if senses_count == considered_sense_count:
+                        good_b1_uq += 1
+
+        if decision2 is not None:
+            prob, sense_id, senses_count, considered_sense_count = decision2
+            
+            # Increase occurence counts.
+            num_a2 += 1
+            if senses_count == considered_sense_count:
+                num_b2 += 1
+
+            # Correct?
+            if sense_id == true_sense:
+                good_a2 += 1
+                if senses_count == considered_sense_count:
+                    good_b2 += 1
+
+            # Unique word indication.
+            if new_word:
+                if senses_count == considered_sense_count and not lemma in words_checked_b1:
+                    words_checked_b2.add(lemma) # marked as checked with all info on all senses
+
+                if sense_id == true_sense:
+                    good_a2_uq += 1
+                    if senses_count == considered_sense_count:
+                        good_b2_uq += 1
+
+        if decision3 is not None:
+            prob, sense_id, senses_count, considered_sense_count = decision3
+            
+            # Increase occurence counts.
+            num_a3 += 1
+            if senses_count == considered_sense_count:
+                num_b3 += 1
+
+            # Correct?
+            if sense_id == true_sense:
+                good_a3 += 1
+                if senses_count == considered_sense_count:
+                    good_b3 += 1
+
+            # Unique word indication.
+            if new_word:
+                if senses_count == considered_sense_count and not lemma in words_checked_b1:
+                    words_checked_b3.add(lemma) # marked as checked with all info on all senses
+
+                if sense_id == true_sense:
+                    good_a3_uq += 1
+                    if senses_count == considered_sense_count:
+                        good_b3_uq += 1
+
+        if decision4 is not None:
+            prob, sense_id, senses_count, considered_sense_count = decision4
+            
+            # Increase occurence counts.
+            num_a4 += 1
+            if senses_count == considered_sense_count:
+                num_b4 += 1
+
+            # Correct?
+            if sense_id == true_sense:
+                good_a4 += 1
+                if senses_count == considered_sense_count:
+                    good_b4 += 1
+
+            # Unique word indication.
+            if new_word:
+                if senses_count == considered_sense_count and (not lemma in words_checked_b1
+                        and not lemma in words_checked_b2 and not lemma in words_checked_b3):
+                    words_checked_b4.add(lemma) # marked as checked with all info on all senses
+
+                if sense_id == true_sense:
+                    good_a4_uq += 1
+                    if senses_count == considered_sense_count:
+                        good_b4_uq += 1
+
+num_all_unique = len(words_checked_b1)+len(words_checked_b2)+len(words_checked_b3)+len(words_checked_b4)+len(words_checked_rest)
+print('Relations subset 1 (some, all senses present): all | good | accuracy')
+print(num_a1, good_a1, good_a1/num_a1)
+print('all occurences', num_all, good_a1, good_a1/num_all)
+print('unique', len(words_checked_a), good_a1_uq, good_a1_uq/len(words_checked_a))
+print('all occurences, unique', num_all_unique, good_a1_uq, good_a1_uq/num_all_unique)
+print('----')
+print(num_b1, good_b1, good_b1/num_b1)
+print('all occurences', num_all, good_b1, good_b1/num_all)
+print('unique', len(words_checked_b1), good_b1_uq, good_b1_uq/len(words_checked_b1))
+print('all occurences, unique', num_all_unique, good_b1_uq, good_b1_uq/num_all_unique)
+
+print('Relations subset 2 (some, all senses present): all | good | accuracy')
+print(num_a2, good_a2, good_a2/num_a2)
+print('all occurences', num_all, good_a2, good_a2/num_all)
+print('unique', len(words_checked_a), good_a2_uq, good_a2_uq/len(words_checked_a))
+print('all occurences, unique', num_all_unique, good_a2_uq, good_a2_uq/num_all_unique)
+print('----')
+print(num_b2, good_b2, good_b2/num_b2)
+print('all occurences', num_all, good_b2, good_b2/num_all)
+print('unique', len(words_checked_b2)+len(words_checked_b1), good_b2_uq,
+        good_b2_uq/(len(words_checked_b2)+len(words_checked_b1)))
+print('all occurences, unique', num_all_unique, good_b2_uq, good_b2_uq/num_all_unique)
+
+print('Relations subset 3 (some, all senses present): all | good | accuracy')
+print(num_a3, good_a3, good_a3/num_a3)
+print('all occurences', num_all, good_a3, good_a3/num_all)
+print('unique', len(words_checked_a), good_a3_uq, good_a3_uq/len(words_checked_a))
+print('all occurences, unique', num_all_unique, good_a3_uq, good_a3_uq/num_all_unique)
+print('----')
+print(num_b3, good_b3, good_b3/num_b3)
+print('all occurences', num_all, good_b3, good_b3/num_all)
+print('unique', len(words_checked_b3)+len(words_checked_b1), good_b3_uq,
+        good_b3_uq/(len(words_checked_b3)+len(words_checked_b1)))
+print('all occurences, unique', num_all_unique, good_b3_uq, good_b3_uq/num_all_unique)
+
+print('Relations subset 4 (some, all senses present): all | good | accuracy')
+print(num_a4, good_a4, good_a4/num_a4)
+print('all occurences', num_all, good_a4, good_a4/num_all)
+print('unique', len(words_checked_a), good_a4_uq, good_a4_uq/len(words_checked_a))
+print('all occurences, unique', num_all_unique, good_a4_uq, good_a4_uq/num_all_unique)
+print('----')
+print(num_b4, good_b4, good_b4/num_b4)
+print('all occurences', num_all, good_b4, good_b4/num_all)
+print('unique', len(words_checked_b4)+len(words_checked_b3)+len(words_checked_b2)+len(words_checked_b1)
+        good_b4_uq,
+        good_b4_uq/(len(words_checked_b4)+len(words_checked_b3)+len(words_checked_b2)+len(words_checked_b1)))
+print('all occurences, unique', num_all_unique, good_b4_uq, good_b4_uq/num_all_unique)

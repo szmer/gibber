@@ -1,4 +1,4 @@
-import os
+import os, pexpect, re
 
 from random import randint
 from math import floor
@@ -22,6 +22,8 @@ learning_rate = 0.3
 reg_rate = 0.005 # regularization
 corp_runs = 2 # how many times to feed the whole corpus during training
 
+TRANSFORM_LEMMAS = True # should we use Morfeusz to make gerund lemmas instead of infinitive, etc.?
+
 #
 ## Get word vectors
 #
@@ -34,6 +36,7 @@ idx_to_word = {}
 vecs_count = 0
 vecs_dim = 100
 
+print('Loading word vectors.')
 # Get the vector word labels (we'll get vectors themselves in a moment).
 with open(vecs_path) as vecs_file:
     for line in vecs_file:
@@ -49,7 +52,7 @@ with open(vecs_path) as vecs_file:
         idx_to_word[word_n] = word
         word_n += 1
 
-word_vecs = np.loadtxt(vecs_path+"data", encoding="utf-8",
+word_vecs = np.loadtxt(vecs_path, encoding="utf-8",
                        dtype=np.float32, # tensorflow's requirement
                        skiprows=1, usecols=tuple(range(1, vecs_dim+1)))
 
@@ -60,6 +63,9 @@ vecs_count += 1
 # Get the word's vector, or the dummy marker.
 def word_id(word):
     return word_to_idx[word] if word in word_to_idx else vecs_count-1
+
+# We need a special token for cases when the target word is near the start or end of sentence.
+bound_token_id = vecs_count - 1 # the zero additional vector
 
 #
 ## Load or train the model for estimating 'gibberish'.
@@ -114,10 +120,6 @@ else:
     ##
     ## We want a training set of multiword contexts (train) and target words (labels);
     ## the model will learn to distinguish genuine from fake (negative) context-target pairs
-
-    # We need a special token for cases when the target word is near the start or end of sentence.
-    bound_token_id = vecs_count - 1 # the zero additional vector
-
     sample_n = 0
 
     train = np.zeros(((words_count + words_count) * corp_runs, # positive & negative samples
@@ -171,7 +173,7 @@ else:
     model.add(Activation('sigmoid'))
     opt = SGD(lr=learning_rate, decay=reg_rate)
     model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
-    model.fit(train, labels)
+    model.fit(train, labels, batch_size=128)
 
     model.save('./gibberish_estimator.h5')
 
@@ -206,10 +208,13 @@ rels3 = {'14', '15' # mero/holonymy
 # to take into account all possibilities given by raw word forms. Our model will try to
 # **select** the correct lex_unit ids for given form in given context.
 # NOTE 2. We store the bulk of relations in x1 dicts, x2 and x3 store only ones specific to them
-
-# NOTE 3. "lexical units" and "wordids" in fact relate to distinct senses, as per the Wordnet.
+# NOTE 3. "lexical units" and "wordids" in fact relate to distinct senses, as per the Wordnet
 
 skl_word_wordids = defaultdict(list) # word -> ids as list
+
+# NOTE 4. We append variant numbers to wordids, as in aaa_111 (see comment in experiment source
+# file
+skl_wordid_symbols = dict()
 
 skl_wordid_neighbors1 = defaultdict(list) # lemmas
 skl_wordid_neighbors2 = defaultdict(list)
@@ -223,26 +228,48 @@ def reverse_list_dict(dic):
             new_dic[v].append(key)
     return new_dic
 
-
 ## Dealing with some lemmatization quirks of our corpus.
 def rm_sie(base):
     if base[-len(' się'):] == ' się':
         return base[:-len(' się')]
     else:
         return base
+
+morfeusz_generator = pexpect.spawn('morfeusz_generator')
+pexp_result = morfeusz_generator.expect(['Using dictionary: [^\\n]*$', pexpect.EOF, pexpect.TIMEOUT])
+if pexp_result != 0:
+    raise RuntimeError('cannot run morfeusz_generator properly')
+
 # Some lemmas mapped into lexical unit of "osoba"
 persons = ['ja', 'ty', 'on', 'ona', 'ono', 'my', 'wy', 'oni', 'one', 'siebie', 'kto', 'któż', 'wszyscy']
-def normalize_lemma(l):
+def normalize_lemma(l, tag):
     if l in persons:
-       return 'osoba'
+        return 'osoba'
+    if TRANSFORM_LEMMAS and re.match('^ger:', tag):
+        morfeusz_generator.send(l+'\n')
+        morfeusz_generator.expect(['\\]', pexpect.EOF, pexpect.TIMEOUT])
+        forms = morfeusz_generator.before.decode().strip() # encode from bytes into str, strip whitespace
+        base_form = re.findall('[\\[ ](.*),{}[^,]*,ger:sg:nom\\S*aff'.format(l), forms)
+        if len(base_form) == 0:
+            raise ValueError('cannot obtain gerund base form for {}'.format(l))
+        base_form = base_form[0]
+        return base_form
     return l
 
 def add_word_neighborhoods(words):
-    """Add neighbor forms for given words to skl_wordid_neighbors* variables."""
+    """Add neighbor senses for given (lemma, tag) pairs to skl_wordid_neighbors* variables."""
 
-    words = set([normalize_lemma(w) for w in words])
+    norm_words = set()
+    for (w, t) in words:
+        try:
+            norm_words.add((normalize_lemma(w, t), t))
+        except ValueError as ve:
+            print(ve)
+            norm_words.add((w, t))
+    # NOTE Here we remove tags.
+    words = [w for (w, t) in norm_words]
 
-    new_words = set([w for w in words if not w in word_wordids])
+    new_words = set([w for w in words if not w in skl_word_wordids])
 
     # Prepare the temporary indices.
     skl_wordid_synsets = defaultdict(list) # to harness synset relations
@@ -258,15 +285,18 @@ def add_word_neighborhoods(words):
         # Wordnet lexical ID's of lemmas present in Składnica.
         for lex_unit in wordnet_xml.iterfind('lexical-unit'):
             form = lex_unit.get('name').lower()
-            if form in words or rm_sie(form) in new_words:
-                word_wordids[form].append(lex_unit.get('id'))
+            if form in new_words or rm_sie(form) in new_words:
+                skl_word_wordids[form].append(lex_unit.get('id'))
+                # Preserve the variant number in full symbol.
+                skl_wordid_symbols[lex_unit.get('id')] = lex_unit.get('id')+'_'+lex_unit.get('variant')
 
         # The r.* dicts are obtained by reversal of their parent dictionary when needed by the neighborhood function.
         # (reverse dict)
         rskl_word_wordids = reverse_list_dict(skl_word_wordids) # ids -> words
 
         # !!! From now on, make sure that this dict only contains new_words.
-        rskl_word_wordids = dict([(id, word) for (id, word) in rskl_word_wordids if word in new_words])
+        # (note that rskl_word_wordids gives us singleton lists as dict values)
+        rskl_word_wordids = dict([(id, words) for (id, words) in rskl_word_wordids.items() if words[0] in new_words])
 
         # Get the synsets for new words.
         for synset in wordnet_xml.iterfind('synset'):
@@ -296,6 +326,7 @@ def add_word_neighborhoods(words):
         rskl_wordid_synsets = reverse_list_dict(skl_wordid_synsets)
 
         # Get synset relations.  for synrel in wordnet_xml.iterfind('synsetrelations'):
+        for synrel in wordnet_xml.iterfind('synsetrelations'):
             if synrel.get('parent') in rskl_wordid_synsets:
                 if synrel.get('relation') in rels1:
                     skl_neighbor_syns1[synrel.get('child')].append(synrel.get('parent'))
@@ -334,19 +365,19 @@ def add_word_neighborhoods(words):
 
         # (get reverses of these)
         rskl_wordid_neighbor_ids1 = reverse_list_dict(skl_wordid_neighbor_ids1)
-        skl_neighbor_id_wordids2 = reverse_list_dict(skl_wordid_neighbor_ids2)
-        skl_neighbor_id_wordids3 = reverse_list_dict(skl_wordid_neighbor_ids3)
+        rskl_wordid_neighbor_ids2 = reverse_list_dict(skl_wordid_neighbor_ids2)
+        rskl_wordid_neighbor_ids3 = reverse_list_dict(skl_wordid_neighbor_ids3)
 
         # Finally, harness neighbors by their known wordids.
         for lex_unit in wordnet_xml.iterfind('lexical-unit'):
-            if lex_unit.get('id') in skl_neighbor_id_wordids1:
-                for receiver in skl_neighbor_id_wordids1[lex_unit.get('id')]: # words "interested" in this neighbor
+            if lex_unit.get('id') in rskl_wordid_neighbor_ids1:
+                for receiver in rskl_wordid_neighbor_ids1[lex_unit.get('id')]: # words "interested" in this neighbor
                     skl_wordid_neighbors1[receiver].append(lex_unit.get('name').lower())
-            if lex_unit.get('id') in skl_neighbor_id_wordids2:
-                for receiver in skl_neighbor_id_wordids2[lex_unit.get('id')]:
+            if lex_unit.get('id') in rskl_wordid_neighbor_ids2:
+                for receiver in rskl_wordid_neighbor_ids2[lex_unit.get('id')]:
                     skl_wordid_neighbors2[receiver].append(lex_unit.get('name').lower())
-            if lex_unit.get('id') in skl_neighbor_id_wordids3:
-                for receiver in skl_neighbor_id_wordids3[lex_unit.get('id')]:
+            if lex_unit.get('id') in rskl_wordid_neighbor_ids3:
+                for receiver in rskl_wordid_neighbor_ids3[lex_unit.get('id')]:
                     skl_wordid_neighbors3[receiver].append(lex_unit.get('name').lower())
 
 ##
@@ -363,19 +394,22 @@ def fill_sample(lemma, sent, token_id):
         sample[0, window_size+j+1] = (word_id(sent[token_id+j+1])
                                         if token_id+j+1 < len(sent)
                                         else bound_token_id)
-def predict_sense(token_lemma, sent, token_id):
-    "Return decisions made when using subsets 1, 2, 3, 4 of relations as tuples
-    (probability, sense, sense_count, considered_sense_count) or None's if no decision."
+def predict_sense(token_lemma, tag, sent, token_id):
+    """Return decisions made when using subsets 1, 2, 3, 4 of relations as tuples
+    (probability, sense, sense_count, considered_sense_count) or None's if no decision."""
 
     fill_sample(token_lemma, sent, token_id)
     reference_prob = model.predict(sample)[0][0]
 
     # For the purpose of finding neighbors, we need to do the adjustments.
-    token_lemma = normalize_lemma(token_lemma)
+    try:
+        token_lemma = normalize_lemma(token_lemma, tag)
+    except ValueError as ve:
+        print(ve)
 
     sense_wordids = skl_word_wordids[token_lemma]
     if len(sense_wordids) == 0:
-        sense_wordids = skl_word_wordids[lemma + ' się']
+        sense_wordids = skl_word_wordids[token_lemma + ' się']
         if len(sense_wordids) == 0:
             raise LookupError('no senses found for {}'.format(token_lemma))
 
@@ -413,8 +447,9 @@ def predict_sense(token_lemma, sent, token_id):
             
         winners1 = [sid for (sid, p) in enumerate(sense_probs1) if p == max(sense_probs1)]
         #print(winners, sense_wordids)
-        decision1 = sense_wordids[choice(winners1)]
-        decision1 = (decision1, dict(sense_probs1)[decision1], len(sense_wordids), senses_considered1)
+        winner_id = choice(winners1)
+        decision1 = skl_wordid_symbols[sense_wordids[winner_id]]
+        decision1 = (decision1, sense_probs1[winner_id], len(sense_wordids), senses_considered1)
     
     # 2nd subset (1+2)
     if sum([len(x) for x in sense_ngbs2]) > 0: # there's a neighbor for at least one sense
@@ -434,8 +469,9 @@ def predict_sense(token_lemma, sent, token_id):
                                 / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid]))
             
         winners2 = [sid for (sid, p) in enumerate(sense_probs2) if p == max(sense_probs2)]
-        decision2 = sense_wordids[choice(winners2)]
-        decision2 = (decision2, dict(sense_probs2)[decision2], len(sense_wordids), senses_considered2)
+        winner_id = choice(winners2)
+        decision2 = skl_wordid_symbols[sense_wordids[winner_id]]
+        decision2 = (decision2, sense_probs2[winner_id], len(sense_wordids), senses_considered2)
            
     # 3rd subset (1+3)
     if sum([len(x) for x in sense_ngbs3]) > 0: # there's a neighbor for at least one sense
@@ -455,8 +491,9 @@ def predict_sense(token_lemma, sent, token_id):
                                 / (sense_ngbcounts1[sid] + sense_ngbcounts3[sid]))
             
         winners3 = [sid for (sid, p) in enumerate(sense_probs3) if p == max(sense_probs3)]
-        decision3 = sense_wordids[choice(winners3)]
-        decision3 = (decision3, dict(sense_probs3)[decision3], len(sense_wordids), senses_considered3)
+        winner_id = choice(winners3)
+        decision3 = skl_wordid_symbols[sense_wordids[winner_id]]
+        decision3 = (decision3, sense_probs3[winner_id], len(sense_wordids), senses_considered3)
             
     # 4th subset (1+2+3)
     for sid, _ in enumerate(sense_wordids):
@@ -468,7 +505,8 @@ def predict_sense(token_lemma, sent, token_id):
                              + sense_probs3[sid] * sense_ngbcounts3[sid])
                             / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid] + sense_ngbcounts3[sid]))
     winners4 = [sid for (sid, p) in enumerate(sense_probs4) if p == max(sense_probs4)]
-    decision4 = sense_wordids[choice(winners4)]
-    decision4 = (decision4, dict(sense_probs4)[decision4], len(sense_wordids), senses_considered4)
+    winner_id = choice(winners4)
+    decision4 = skl_wordid_symbols[sense_wordids[winner_id]]
+    decision4 = (decision4, sense_probs4[winner_id], len(sense_wordids), senses_considered4)
 
     return (decision1, decision2, decision3, decision4)

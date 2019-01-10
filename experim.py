@@ -4,7 +4,7 @@ from itertools import chain
 from operator import itemgetter
 from lxml import etree
 
-from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, transform_lemmas, output_prefix
+from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, transform_lemmas, output_prefix, full_diagnostics, diagnostics_when_23_fails
 from gibber_wsd import add_word_neighborhoods, fill_sample, predict_sense
 import gibber_wsd
 
@@ -163,7 +163,7 @@ for sent in sents:
         try:
             decision1, decision2, decision3, decision4 = predict_sense(lemma, tag,
                     [tok_info[0] for tok_info in sent], # give only lemmas
-                    tid)
+                    tid, verbose=full_diagnostics)
         except LookupError as err:
             print(err)
             words_checked_rest.add(lemma)
@@ -174,6 +174,10 @@ for sent in sents:
             words_checked_rest.add(lemma)
         
         new_word = False
+
+        good1 = False # indicate if the first decision was good to show diagnostics when 3 or 3 failse
+        good2 = False
+        good3 = False
 
         if decision1 is not None:
             sense_id, prob, senses_count, considered_sense_count = decision1
@@ -189,6 +193,7 @@ for sent in sents:
             # Correct?
             if sense_match(sense_id, true_sense):
                 good_a1 += 1
+                good1 = True
                 if senses_count == considered_sense_count:
                     good_b1 += 1
 
@@ -210,13 +215,14 @@ for sent in sents:
         if decision2 is not None or decision1 is not None:
             if decision2 is None:
                 sense_id, prob, senses_count, considered_sense_count = decision1
+                if good1:
+                    good2 = True
             else:
                 sense_id, prob, senses_count, considered_sense_count = decision2
 
             if output_prefix is not None:
                 sense_data = sense_id.split('_')
                 print('{},{},{},{}'.format(lemma, tag, sense_data[1], sense_data[0]), file=out2)
-            
             
             # Increase occurence counts.
             num_a2 += 1
@@ -226,6 +232,7 @@ for sent in sents:
             # Correct?
             if sense_match(sense_id, true_sense):
                 good_a2 += 1
+                good2 = True
                 if senses_count == considered_sense_count:
                     good_b2 += 1
 
@@ -244,6 +251,8 @@ for sent in sents:
         if decision3 is not None or decision1 is not None:
             if decision3 is None:
                 sense_id, prob, senses_count, considered_sense_count = decision1
+                if good1:
+                    good3 = True
             else:
                 sense_id, prob, senses_count, considered_sense_count = decision3
             
@@ -259,6 +268,7 @@ for sent in sents:
             # Correct?
             if sense_match(sense_id, true_sense):
                 good_a3 += 1
+                good3 = True
                 if senses_count == considered_sense_count:
                     good_b3 += 1
 
@@ -276,7 +286,6 @@ for sent in sents:
 
         if decision4 is not None:
             sense_id, prob, senses_count, considered_sense_count = decision4
-            
             
             if output_prefix is not None:
                 sense_data = sense_id.split('_')
@@ -305,6 +314,11 @@ for sent in sents:
                         good_b4_uq += 1
         elif output_prefix is not None:
             print('{},{},{},{}'.format(lemma, tag, '?', '?'), file=out4)
+
+        # Re-run with diagnostics when diagnostics_when_23_fails condition is true.
+        if diagnostics_when_23_fails and (not full_diagnostics) and good1 and not (good2 and good3):
+            predict_sense(lemma, tag, [tok_info[0] for tok_info in sent], # give only lemmas
+                    tid, verbose=True)
 
 if output_prefix is not None:
     out1.close()

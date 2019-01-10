@@ -11,6 +11,9 @@ mode = 'wordnet2_annot'
 #mode = 'wordnet3_annot'
 transform_lemmas = False
 
+full_diagnostics = False
+diagnostics_when_23_fails = True # show diagnostics for cases when subset 2 or 3 fails and the 1st is correct
+
 # If this is not None, four predictions will be printed to CSV files, containing in their
 # columns: lemma, tag, sense variant number, lexical id (ie. Wordnet unit identifier)
 output_prefix = 'wsd_prediction_'

@@ -396,7 +396,7 @@ def fill_sample(lemma, sent, token_id):
                                         if token_id+j+1 < len(sent)
                                         else bound_token_id)
 
-def predict_sense(token_lemma, tag, sent, token_id):
+def predict_sense(token_lemma, tag, sent, token_id, verbose=False):
     """Get token_lemma and tag as strings, the whole sent as a sequence of strings, and token_id
     indicating the index where the token is in the sentence. Return decisions made when using
     subsets 1, 2, 3, 4 of relations as tuples (estimated probability, sense, retrieved_sense_count,
@@ -420,17 +420,17 @@ def predict_sense(token_lemma, tag, sent, token_id):
             raise LookupError('no senses found for {}'.format(token_lemma))
 
     # Neighbors of each sense.
-    sense_ngbs1 = [skl_wordid_neighbors1[swi] for swi in sense_wordids]
+    sense_ngbs1 = [set(skl_wordid_neighbors1[swi]) for swi in sense_wordids]
     # Number of neighbors for each sense - important when calculating average for later relation subsets.
-    sense_ngbcounts1 = [len(skl_wordid_neighbors1[swi]) for swi in sense_wordids]
+    sense_ngbcounts1 = [len(set(skl_wordid_neighbors1[swi])) for swi in sense_wordids]
     sense_probs1 = [reference_prob for x in sense_wordids] # prefill, maybe will be replaced later
     senses_considered1 = 0 # actual number of senses that data allowed us to evaluate
-    sense_ngbs2 = [skl_wordid_neighbors2[swi] for swi in sense_wordids]
-    sense_ngbcounts2 = [len(skl_wordid_neighbors2[swi]) for swi in sense_wordids]
+    sense_ngbs2 = [set(skl_wordid_neighbors2[swi]) for swi in sense_wordids]
+    sense_ngbcounts2 = [len(set(skl_wordid_neighbors2[swi])) for swi in sense_wordids]
     sense_probs2 = [reference_prob for x in sense_wordids]
     senses_considered2 = 0
-    sense_ngbs3 = [skl_wordid_neighbors3[swi] for swi in sense_wordids]
-    sense_ngbcounts3 = [len(skl_wordid_neighbors3[swi]) for swi in sense_wordids]
+    sense_ngbs3 = [set(skl_wordid_neighbors3[swi]) for swi in sense_wordids]
+    sense_ngbcounts3 = [len(set(skl_wordid_neighbors3[swi])) for swi in sense_wordids]
     sense_probs3 = [reference_prob for x in sense_wordids]
     senses_considered3 = 0
     sense_probs4 = [reference_prob for x in sense_wordids]
@@ -438,8 +438,13 @@ def predict_sense(token_lemma, tag, sent, token_id):
     
     decision1, decision2, decision3, decision4 = None, None, None, None
     
+    if verbose:
+        print('\n# Disambiguating {} in {}'.format(token_lemma, sent))
+
     # 1st subset:
     if sum([len(x) for x in sense_ngbs1]) > 0: # we need a neighbor for at least one sense
+        if verbose:
+            print('# Relation subset 1.')
         for (sid, ngbs) in enumerate(sense_ngbs1):
             if len(ngbs) == 0:
                 continue
@@ -450,15 +455,23 @@ def predict_sense(token_lemma, tag, sent, token_id):
                 
             # We have average prob of any neighbor of this sense
             sense_probs1[sid] /= sense_ngbcounts1[sid]
+
+            if verbose:
+                print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
+                                               sense_probs1[sid], ngbs))
             
         winners1 = [sid for (sid, p) in enumerate(sense_probs1) if p == max(sense_probs1)]
         #print(winners, sense_wordids)
         winner_id = choice(winners1)
         decision1 = skl_wordid_symbols[sense_wordids[winner_id]]
+        if verbose:
+            print('The winner is {}'.format(decision1))
         decision1 = (decision1, sense_probs1[winner_id], len(sense_wordids), senses_considered1)
     
     # 2nd subset (1+2)
     if sum([len(x) for x in sense_ngbs2]) > 0: # there's a neighbor for at least one sense
+        if verbose:
+            print('# Relation subset 2.')
         for (sid, ngbs) in enumerate(sense_ngbs2):
             if len(ngbs) == 0: # if we have no specific info on this set of relations
                 if sense_ngbcounts1[sid] > 1: # just carry the "1" average
@@ -473,14 +486,22 @@ def predict_sense(token_lemma, tag, sent, token_id):
             # (note that it can be ignored due to zero neighbors)
             sense_probs2[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid]) + sense_probs2[sid])
                                 / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid]))
+
+            if verbose:
+                print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
+                                               sense_probs2[sid], ngbs))
             
         winners2 = [sid for (sid, p) in enumerate(sense_probs2) if p == max(sense_probs2)]
         winner_id = choice(winners2)
         decision2 = skl_wordid_symbols[sense_wordids[winner_id]]
+        if verbose:
+            print('The winner is {}'.format(decision2))
         decision2 = (decision2, sense_probs2[winner_id], len(sense_wordids), senses_considered2)
            
     # 3rd subset (1+3)
     if sum([len(x) for x in sense_ngbs3]) > 0: # there's a neighbor for at least one sense
+        if verbose:
+            print('# Relation subset 3.')
         for (sid, ngbs) in enumerate(sense_ngbs3):
             if len(ngbs) == 0:
                 if sense_ngbcounts1[sid] > 1: # just carry the "1" average
@@ -495,13 +516,21 @@ def predict_sense(token_lemma, tag, sent, token_id):
             # (note that it can be ignored due to zero neighbors)
             sense_probs3[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid]) + sense_probs3[sid])
                                 / (sense_ngbcounts1[sid] + sense_ngbcounts3[sid]))
+
+            if verbose:
+                print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
+                                               sense_probs3[sid], ngbs))
             
         winners3 = [sid for (sid, p) in enumerate(sense_probs3) if p == max(sense_probs3)]
         winner_id = choice(winners3)
         decision3 = skl_wordid_symbols[sense_wordids[winner_id]]
+        if verbose:
+            print('The winner is {}'.format(decision3))
         decision3 = (decision3, sense_probs3[winner_id], len(sense_wordids), senses_considered3)
             
     # 4th subset (1+2+3)
+    if verbose:
+        print('# Relation subset 4.')
     for sid, _ in enumerate(sense_wordids):
         if sense_ngbcounts1[sid] == 0 and sense_ngbcounts2[sid] == 0 and sense_ngbcounts3[sid] == 0:
             continue
@@ -510,9 +539,15 @@ def predict_sense(token_lemma, tag, sent, token_id):
                              + sense_probs2[sid] * sense_ngbcounts2[sid]
                              + sense_probs3[sid] * sense_ngbcounts3[sid])
                             / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid] + sense_ngbcounts3[sid]))
+
+        if verbose:
+            print('* Sense {} ({})'.format(skl_wordid_symbols[sense_wordids[sid]], sense_probs4[sid]))
+
     winners4 = [sid for (sid, p) in enumerate(sense_probs4) if p == max(sense_probs4)]
     winner_id = choice(winners4)
     decision4 = skl_wordid_symbols[sense_wordids[winner_id]]
+    if verbose:
+        print('The winner is {}'.format(decision4))
     decision4 = (decision4, sense_probs4[winner_id], len(sense_wordids), senses_considered4)
 
     return (decision1, decision2, decision3, decision4)

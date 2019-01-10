@@ -11,9 +11,13 @@ mode = 'wordnet2_annot'
 #mode = 'wordnet3_annot'
 transform_lemmas = False
 
+# If this is not None, four predictions will be printed to CSV files, containing in their
+# columns: lemma, tag, sense variant number, lexical id (ie. Wordnet unit identifier)
+output_prefix = 'wsd_prediction_'
+
 # for wordnet2_annot mode
 skladnica_sections_index_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/sections.txt"
 skladnica_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/"
 
 # for wordnet3_annot mode
-annot_sentences_path = 'oznaczenia-wszystko-plwordnet3.csv'
+annot_sentences_path = 'oznaczenia-wszystko-plwordnet-gotowe-new.csv'

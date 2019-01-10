@@ -4,7 +4,7 @@ from itertools import chain
 from operator import itemgetter
 from lxml import etree
 
-from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, transform_lemmas
+from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, transform_lemmas, output_prefix
 from gibber_wsd import add_word_neighborhoods, fill_sample, predict_sense
 import gibber_wsd
 
@@ -141,11 +141,22 @@ def sense_match(full, partial):
     lexid, variant = full[0], full[1]
     return re.match('^({})?_({})?$'.format(lexid, variant), partial)
 
+if output_prefix is not None:
+    out1 = open(output_prefix+'1', 'w+')
+    out2 = open(output_prefix+'2', 'w+')
+    out3 = open(output_prefix+'3', 'w+')
+    out4 = open(output_prefix+'4', 'w+')
+
 print('Performing the test on sense-annotated sentences.')
 for sent in sents:
     for (tid, token_data) in enumerate(sent):
         lemma, true_sense, tag = token_data[0], token_data[1], token_data[2]
         if true_sense is None:
+            if output_prefix is not None:
+                print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out1)
+                print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out2)
+                print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out3)
+                print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out4)
             continue
 
         fill_sample(lemma, sent, tid)
@@ -166,6 +177,9 @@ for sent in sents:
 
         if decision1 is not None:
             sense_id, prob, senses_count, considered_sense_count = decision1
+            if output_prefix is not None:
+                sense_data = sense_id.split('_')
+                print('{},{},{},{}'.format(lemma, tag, sense_data[1], sense_data[0]), file=out1)
             
             # Increase occurence counts.
             num_a1 += 1
@@ -190,12 +204,19 @@ for sent in sents:
                     good_a1_uq += 1
                     if senses_count == considered_sense_count:
                         good_b1_uq += 1
+        elif output_prefix is not None:
+            print('{},{},{},{}'.format(lemma, tag, '?', '?'), file=out1)
 
         if decision2 is not None or decision1 is not None:
             if decision2 is None:
                 sense_id, prob, senses_count, considered_sense_count = decision1
             else:
                 sense_id, prob, senses_count, considered_sense_count = decision2
+
+            if output_prefix is not None:
+                sense_data = sense_id.split('_')
+                print('{},{},{},{}'.format(lemma, tag, sense_data[1], sense_data[0]), file=out2)
+            
             
             # Increase occurence counts.
             num_a2 += 1
@@ -217,6 +238,8 @@ for sent in sents:
                     good_a2_uq += 1
                     if senses_count == considered_sense_count:
                         good_b2_uq += 1
+        elif output_prefix is not None:
+            print('{},{},{},{}'.format(lemma, tag, '?', '?'), file=out2)
 
         if decision3 is not None or decision1 is not None:
             if decision3 is None:
@@ -224,6 +247,10 @@ for sent in sents:
             else:
                 sense_id, prob, senses_count, considered_sense_count = decision3
             
+            if output_prefix is not None:
+                sense_data = sense_id.split('_')
+                print('{},{},{},{}'.format(lemma, tag, sense_data[1], sense_data[0]), file=out3)
+
             # Increase occurence counts.
             num_a3 += 1
             if senses_count == considered_sense_count:
@@ -244,10 +271,17 @@ for sent in sents:
                     good_a3_uq += 1
                     if senses_count == considered_sense_count:
                         good_b3_uq += 1
+        elif output_prefix is not None:
+            print('{},{},{},{}'.format(lemma, tag, '?', '?'), file=out3)
 
         if decision4 is not None:
             sense_id, prob, senses_count, considered_sense_count = decision4
             
+            
+            if output_prefix is not None:
+                sense_data = sense_id.split('_')
+                print('{},{},{},{}'.format(lemma, tag, sense_data[1], sense_data[0]), file=out4)
+
             # Increase occurence counts.
             num_a4 += 1
             if senses_count == considered_sense_count:
@@ -269,6 +303,14 @@ for sent in sents:
                     good_a4_uq += 1
                     if senses_count == considered_sense_count:
                         good_b4_uq += 1
+        elif output_prefix is not None:
+            print('{},{},{},{}'.format(lemma, tag, '?', '?'), file=out4)
+
+if output_prefix is not None:
+    out1.close()
+    out2.close()
+    out3.close()
+    out4.close()
 
 num_all_unique = len(words_checked_a)+len(words_checked_rest)
 

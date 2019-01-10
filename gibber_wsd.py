@@ -13,7 +13,7 @@ from keras.layers import Dense, Activation
 from keras.layers import LSTM, Embedding
 from keras.optimizers import SGD
 
-from resources_conf import nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path
 
 vecs_dim = 100
 window_size = 4 # how many words to condider on both sides of the target
@@ -79,39 +79,38 @@ if os.path.isfile('./gibberish_estimator.h5'):
 else:
     print('No pretrained model found in gibberish_estimator.h5, training anew')
     ## Read the NKJP fragments, as lists of lemmas
-    unique_words = set()
     words_count = 0
     train_sents = []
-    rejected_sent_ids = []
 
-    with open(nkjp_index_path) as index:
-        for fragm_id in index:
-            fragm_id = fragm_id.strip()
-            # tag is namespaced, .// for finding anywhere in the tree
-            tokens_filepath = nkjp_path+fragm_id+'/ann_morphosyntax.xml'
-            if not os.path.isfile(tokens_filepath):
-                print('Note: cannot access {}'.format(fragm_id.strip()))
-                continue
-            tree = etree.parse(tokens_filepath)
-            for sent_subtree in tree.iterfind('.//{http://www.tei-c.org/ns/1.0}s[@{http://www.w3.org/XML/1998/namespace}id]'):
-                sent_lemmas = []
-                for seg in sent_subtree.iterfind('.//{http://www.tei-c.org/ns/1.0}seg'):
-                    form = None
-                    lemma = None 
-                    for elem in seg.iterfind('.//{http://www.tei-c.org/ns/1.0}f[@name]'):
-                        if elem.attrib['name'] == 'base':
-                            lemma = elem[0].text # first child <string>
-                        if elem.attrib['name'] == 'orth':
-                            form = elem[0].text # first child <string>
-                    if lemma is not None:
-                        sent_lemmas.append(lemma.lower())
-                    else: # can happen when the form is number and there's no lemma
-                        sent_lemmas.append(form.lower())
-                train_sents += [[]]
-                for word in sent_lemmas:
-                    train_sents[-1].append(word)
-                    words_count += 1
-                    unique_words.add(word)
+    if nkjp_format == 'plain':
+        with open(nkjp_index_path) as corp_file:
+            for line in corp_file:
+                lemmas = line.strip().split()
+                train_sents += [l.lower() for l in lemmas]
+                words_count += len(lemmas)
+    if nkjp_format == 'corpus':
+        with open(nkjp_index_path) as index:
+            for fragm_id in index:
+                fragm_id = fragm_id.strip()
+                # tag is namespaced, .// for finding anywhere in the tree
+                tokens_filepath = nkjp_path+fragm_id+'/ann_morphosyntax.xml'
+                if not os.path.isfile(tokens_filepath):
+                    print('Note: cannot access {}'.format(fragm_id.strip()))
+                    continue
+                tree = etree.parse(tokens_filepath)
+                for sent_subtree in tree.iterfind('.//{http://www.tei-c.org/ns/1.0}s[@{http://www.w3.org/XML/1998/namespace}id]'):
+                    sent_lemmas = []
+                    for seg in sent_subtree.iterfind('.//{http://www.tei-c.org/ns/1.0}f[@{http://www.w3.org/XML/1998/namespace}name]'):
+                        if seg['name'] != 'disamb':
+                            continue
+                        interp = seg.find('.//{http://www.tei-c.org/ns/1.0}string').text.split(':')
+                        lemma = interp[0].lower()
+                        #tag = ':'.join(interp[1:])
+                        sent_lemmas.append(lemma)
+                    train_sents += [[]]
+                    for word in sent_lemmas:
+                        train_sents[-1].append(word)
+                        words_count += 1
 
     ### Keras - training the "language/gibberish discriminator"
 
@@ -235,10 +234,11 @@ def rm_sie(base):
     else:
         return base
 
-morfeusz_generator = pexpect.spawn('morfeusz_generator')
-pexp_result = morfeusz_generator.expect(['Using dictionary: [^\\n]*$', pexpect.EOF, pexpect.TIMEOUT])
-if pexp_result != 0:
-    raise RuntimeError('cannot run morfeusz_generator properly')
+if TRANSFORM_LEMMAS:
+    morfeusz_generator = pexpect.spawn('morfeusz_generator')
+    pexp_result = morfeusz_generator.expect(['Using dictionary: [^\\n]*$', pexpect.EOF, pexpect.TIMEOUT])
+    if pexp_result != 0:
+        raise RuntimeError('cannot run morfeusz_generator properly')
 
 # Some lemmas mapped into lexical unit of "osoba"
 persons = ['ja', 'ty', 'on', 'ona', 'ono', 'my', 'wy', 'oni', 'one', 'siebie', 'kto', 'któż', 'wszyscy']
@@ -257,7 +257,8 @@ def normalize_lemma(l, tag):
     return l
 
 def add_word_neighborhoods(words):
-    """Add neighbor senses for given (lemma, tag) pairs to skl_wordid_neighbors* variables."""
+    """Retrieve neighbor senses from Wordnet for all given (lemma, tag) pairs and store them
+    in internal representation for later prediction."""
 
     norm_words = set()
     for (w, t) in words:
@@ -394,9 +395,14 @@ def fill_sample(lemma, sent, token_id):
         sample[0, window_size+j+1] = (word_id(sent[token_id+j+1])
                                         if token_id+j+1 < len(sent)
                                         else bound_token_id)
+
 def predict_sense(token_lemma, tag, sent, token_id):
-    """Return decisions made when using subsets 1, 2, 3, 4 of relations as tuples
-    (probability, sense, sense_count, considered_sense_count) or None's if no decision."""
+    """Get token_lemma and tag as strings, the whole sent as a sequence of strings, and token_id
+    indicating the index where the token is in the sentence. Return decisions made when using
+    subsets 1, 2, 3, 4 of relations as tuples (estimated probability, sense, retrieved_sense_count,
+    considered_sense_count) or None's if no decision. Retrieved_sense_count indicates how many
+    senses were found for the lemma, and considered_sense_count for how many we were able to find
+    a neighborhood with the given subset of relations."""
 
     fill_sample(token_lemma, sent, token_id)
     reference_prob = model.predict(sample)[0][0]

@@ -4,17 +4,12 @@ from itertools import chain
 from operator import itemgetter
 from lxml import etree
 
-from resources_conf import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path
-from gibber_wsd_model import add_word_neighborhoods, fill_sample, predict_sense
-import gibber_wsd_model
+from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, transform_lemmas
+from gibber_wsd import add_word_neighborhoods, fill_sample, predict_sense
+import gibber_wsd
 
 # Transform lemmas of some verb forms?
-gibber_wsd_model.TRANSFORM_LEMMAS = True # False
-
-# For referring to wordnet senses, we use a convention of symbols aaa_111, where
-# aaa is the lexical id, and 111 is the variant number. If one of these is empty
-# (as it is in the loaded sense-annotated data), it is enough for the other
-# information to match.
+gibber_wsd.TRANSFORM_LEMMAS = transform_lemmas
 
 ### Get Składnica sentences
 
@@ -60,7 +55,7 @@ if mode == 'wordnet2_annot':
                                 lemma = lemma.lower()
                                 tag = elem.find('.//f[@type]').text # should be <f type="tag">
                                 sent.append((int(elem.attrib['from']), lemma, lexical_id, tag))
-                                words.add(lemma)
+                                words.add((lemma, tag))
                         sent.sort(key=itemgetter(0))
                         sent = [(token, lexical_id, tag) for num, token, lexical_id, tag in sent]
                         sents.append(sent)
@@ -155,7 +150,9 @@ for sent in sents:
 
         fill_sample(lemma, sent, tid)
         try:
-            decision1, decision2, decision3, decision4 = predict_sense(lemma, tag, sent, tid)
+            decision1, decision2, decision3, decision4 = predict_sense(lemma, tag,
+                    [tok_info[0] for tok_info in sent], # give only lemmas
+                    tid)
         except LookupError as err:
             print(err)
             words_checked_rest.add(lemma)

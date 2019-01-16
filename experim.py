@@ -319,6 +319,7 @@ for sent in sents:
         if diagnostics_when_23_fails and (not full_diagnostics) and good1 and not (good2 and good3):
             predict_sense(lemma, tag, [tok_info[0] for tok_info in sent], # give only lemmas
                     tid, verbose=True)
+            print('The true sense was', true_sense)
 
 if output_prefix is not None:
     out1.close()

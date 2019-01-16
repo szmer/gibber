@@ -13,7 +13,7 @@ from keras.layers import Dense, Activation
 from keras.layers import LSTM, Embedding
 from keras.optimizers import SGD
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, use_pos, transform_lemmas
 
 vecs_dim = 100
 window_size = 4 # how many words to condider on both sides of the target
@@ -22,7 +22,10 @@ learning_rate = 0.3
 reg_rate = 0.005 # regularization
 corp_runs = 2 # how many times to feed the whole corpus during training
 
-TRANSFORM_LEMMAS = True # should we use Morfeusz to make gerund lemmas instead of infinitive, etc.?
+if use_pos:
+    model_filename = './gibberish_estimator_pos.h5'
+else:
+    model_filename = './gibberish_estimator.h5'
 
 #
 ## Get word vectors
@@ -73,9 +76,9 @@ bound_token_id = vecs_count - 1 # the zero additional vector
 
 model = None
 
-if os.path.isfile('./gibberish_estimator.h5'):
+if os.path.isfile(model_filename):
     print('A pretrained model loaded from gibberish_estimator.h5')
-    model = load_model('./gibberish_estimator.h5')
+    model = load_model(model_filename)
 else:
     print('No pretrained model found in gibberish_estimator.h5, training anew')
     ## Read the NKJP fragments, as lists of lemmas
@@ -100,7 +103,7 @@ else:
                 tree = etree.parse(tokens_filepath)
                 for sent_subtree in tree.iterfind('.//{http://www.tei-c.org/ns/1.0}s[@{http://www.w3.org/XML/1998/namespace}id]'):
                     sent_lemmas = []
-                    for seg in sent_subtree.iterfind('.//{http://www.tei-c.org/ns/1.0}f[@{http://www.w3.org/XML/1998/namespace}name]'):
+                    for seg in sent_subtree.iterfind('.//{http://www.tei-c.org/ns/1.0}f[@name]'):
                         if seg['name'] != 'disamb':
                             continue
                         interp = seg.find('.//{http://www.tei-c.org/ns/1.0}string').text.split(':')
@@ -172,9 +175,10 @@ else:
     model.add(Activation('sigmoid'))
     opt = SGD(lr=learning_rate, decay=reg_rate)
     model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
-    model.fit(train, labels, batch_size=128)
+    model.fit(train, labels, batch_size=128, epochs=3)
 
-    model.save('./gibberish_estimator.h5')
+    model.save(model_filename)
+    print('New model saved.')
 
     # cleanup to save some memory
     train, labels = None, None
@@ -234,7 +238,7 @@ def rm_sie(base):
     else:
         return base
 
-if TRANSFORM_LEMMAS:
+if transform_lemmas:
     morfeusz_generator = pexpect.spawn('morfeusz_generator')
     pexp_result = morfeusz_generator.expect(['Using dictionary: [^\\n]*$', pexpect.EOF, pexpect.TIMEOUT])
     if pexp_result != 0:
@@ -245,7 +249,7 @@ persons = ['ja', 'ty', 'on', 'ona', 'ono', 'my', 'wy', 'oni', 'one', 'siebie', '
 def normalize_lemma(l, tag):
     if l in persons:
         return 'osoba'
-    if TRANSFORM_LEMMAS and re.match('^ger:', tag):
+    if transform_lemmas and re.match('^ger:', tag):
         morfeusz_generator.send(l+'\n')
         morfeusz_generator.expect(['\\]', pexpect.EOF, pexpect.TIMEOUT])
         forms = morfeusz_generator.before.decode().strip() # encode from bytes into str, strip whitespace
@@ -387,6 +391,7 @@ def add_word_neighborhoods(words):
 
 sample = np.zeros((1, window_size * 2 + 1), dtype='int')
 def fill_sample(lemma, sent, token_id):
+    # Fill with word ids which will be replaced with vectors by the embedding.
     sample[0, window_size] = word_id(lemma) # the target word
     for j in range(window_size): # its neighbors in the window_size
         sample[0, j] = (word_id(sent[token_id-j-1])

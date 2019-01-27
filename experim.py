@@ -4,9 +4,11 @@ from itertools import chain
 from operator import itemgetter
 from lxml import etree
 
-from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, transform_lemmas, output_prefix, full_diagnostics, diagnostics_when_23_fails
+from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, transform_lemmas, output_prefix, full_diagnostics, diagnostics_when_23_fails, pl_wordnet_path
 from gibber_wsd import add_word_neighborhoods, fill_sample, predict_sense
 import gibber_wsd
+
+print('mode: {}\nNKJP: {}\nWordnet: {}'.format(mode, nkjp_index_path, pl_wordnet_path))
 
 # Transform lemmas of some verb forms?
 gibber_wsd.TRANSFORM_LEMMAS = transform_lemmas
@@ -90,8 +92,8 @@ add_word_neighborhoods(words)
 ##
 
 ## numbers indicate the relation group,
-## a - words where at least one sense has known neighbors,
-## b - words where all senses have known neighbors,
+## A - words where at least one sense has known neighbors,
+## B - words where all senses have known neighbors,
 ## uq - no word repetitions
 ## "Good" values will be divided by N to get accuracy.
 words_checked_a = set() # for determining uniqueness
@@ -159,6 +161,8 @@ for sent in sents:
                 print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out4)
             continue
 
+        num_all += 1
+
         fill_sample(lemma, sent, tid)
         try:
             decision1, decision2, decision3, decision4 = predict_sense(lemma, tag,
@@ -169,13 +173,16 @@ for sent in sents:
             words_checked_rest.add(lemma)
             continue
 
-        num_all += 1
         if [None, None, None, None] == [decision1, decision2, decision3, decision4]:
             words_checked_rest.add(lemma)
-        
-        new_word = False
+            continue
 
-        good1 = False # indicate if the first decision was good to show diagnostics when 3 or 3 failse
+        new_word = False
+        if not lemma in words_checked_a:
+            words_checked_a.add(lemma)
+            new_word = True
+
+        good1 = False # indicate if the first decision was good to show diagnostics when 3 or 3 fails
         good2 = False
         good3 = False
 
@@ -198,10 +205,7 @@ for sent in sents:
                     good_b1 += 1
 
             # Unique word indication.
-            if not lemma in words_checked_a:
-                words_checked_a.add(lemma)
-                new_word = True
-
+            if new_word:
                 if senses_count == considered_sense_count:
                     words_checked_b1.add(lemma) # marked as checked with all info on all senses
 
@@ -327,56 +331,40 @@ if output_prefix is not None:
     out3.close()
     out4.close()
 
-num_all_unique = len(words_checked_a)+len(words_checked_rest)
+num_all_unique = len(words_checked_a)+len(words_checked_rest) # "rest" only captures fundamental prediction failure
 
 print()
 print('Relations subset 1 (some, all senses present): all | good | accuracy')
-print(num_a1, good_a1, good_a1/num_a1)
-print('all occurences', num_all, good_a1, good_a1/num_all)
-print('unique', len(words_checked_a), good_a1_uq, good_a1_uq/len(words_checked_a))
+print('all occurences (also when no decision)', num_all, good_a1, good_a1/num_all)
 print('all occurences, unique', num_all_unique, good_a1_uq, good_a1_uq/num_all_unique)
 print('----')
 print(num_b1, good_b1, good_b1/num_b1)
-print('all occurences', num_all, good_b1, good_b1/num_all)
 print('unique', len(words_checked_b1), good_b1_uq, good_b1_uq/len(words_checked_b1))
-print('all occurences, unique', num_all_unique, good_b1_uq, good_b1_uq/num_all_unique)
 
 print()
 print('Relations subset 2 (some, all senses present): all | good | accuracy')
-print(num_a2, good_a2, good_a2/num_a2)
 print('all occurences', num_all, good_a2, good_a2/num_all)
-print('unique', len(words_checked_a), good_a2_uq, good_a2_uq/len(words_checked_a))
 print('all occurences, unique', num_all_unique, good_a2_uq, good_a2_uq/num_all_unique)
 print('----')
 print(num_b2, good_b2, good_b2/num_b2)
-print('all occurences', num_all, good_b2, good_b2/num_all)
 print('unique', len(words_checked_b2)+len(words_checked_b1), good_b2_uq,
         good_b2_uq/(len(words_checked_b2)+len(words_checked_b1)))
-print('all occurences, unique', num_all_unique, good_b2_uq, good_b2_uq/num_all_unique)
 
 print()
 print('Relations subset 3 (some, all senses present): all | good | accuracy')
-print(num_a3, good_a3, good_a3/num_a3)
 print('all occurences', num_all, good_a3, good_a3/num_all)
-print('unique', len(words_checked_a), good_a3_uq, good_a3_uq/len(words_checked_a))
 print('all occurences, unique', num_all_unique, good_a3_uq, good_a3_uq/num_all_unique)
 print('----')
 print(num_b3, good_b3, good_b3/num_b3)
-print('all occurences', num_all, good_b3, good_b3/num_all)
 print('unique', len(words_checked_b3)+len(words_checked_b1), good_b3_uq,
         good_b3_uq/(len(words_checked_b3)+len(words_checked_b1)))
-print('all occurences, unique', num_all_unique, good_b3_uq, good_b3_uq/num_all_unique)
 
 print()
 print('Relations subset 4 (some, all senses present): all | good | accuracy')
-print(num_a4, good_a4, good_a4/num_a4)
 print('all occurences', num_all, good_a4, good_a4/num_all)
-print('unique', len(words_checked_a), good_a4_uq, good_a4_uq/len(words_checked_a))
 print('all occurences, unique', num_all_unique, good_a4_uq, good_a4_uq/num_all_unique)
 print('----')
 print(num_b4, good_b4, good_b4/num_b4)
-print('all occurences', num_all, good_b4, good_b4/num_all)
 print('unique', len(words_checked_b4)+len(words_checked_b3)+len(words_checked_b2)+len(words_checked_b1),
         good_b4_uq,
         good_b4_uq/(len(words_checked_b4)+len(words_checked_b3)+len(words_checked_b2)+len(words_checked_b1)))
-print('all occurences, unique', num_all_unique, good_b4_uq, good_b4_uq/num_all_unique)

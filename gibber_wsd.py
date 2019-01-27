@@ -13,7 +13,7 @@ from keras.layers import Dense, Activation
 from keras.layers import LSTM, Embedding
 from keras.optimizers import SGD
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, use_pos, transform_lemmas
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path, use_pos, transform_lemmas
 
 vecs_dim = 100
 window_size = 4 # how many words to condider on both sides of the target
@@ -21,11 +21,6 @@ batch_size = window_size * 2 # for training of gibberish discriminator in Keras
 learning_rate = 0.3
 reg_rate = 0.005 # regularization
 corp_runs = 2 # how many times to feed the whole corpus during training
-
-if use_pos:
-    model_filename = './gibberish_estimator_pos.h5'
-else:
-    model_filename = './gibberish_estimator.h5'
 
 #
 ## Get word vectors
@@ -37,7 +32,7 @@ idx_to_word = {}
 
 # we'll read those from the data file
 vecs_count = 0
-vecs_dim = 100
+vecs_dim = 0
 
 print('Loading word vectors.')
 # Get the vector word labels (we'll get vectors themselves in a moment).
@@ -74,11 +69,20 @@ bound_token_id = vecs_count - 1 # the zero additional vector
 ## Load or train the model for estimating 'gibberish'.
 #
 
-model = None
-
-if os.path.isfile(model_filename):
-    print('A pretrained model loaded from gibberish_estimator.h5')
-    model = load_model(model_filename)
+model = Sequential()                                                                                               
+model.add(Embedding(vecs_count,
+                    vecs_dim,
+                    weights=[word_vecs],
+                    input_length=window_size * 2 + 1,
+                    trainable=False))                                                                              
+model.add(LSTM(96))
+model.add(Dense(1))
+model.add(Activation('sigmoid'))
+opt = SGD(lr=learning_rate, decay=reg_rate)
+model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
+if os.path.isfile(model_path):
+    model.load_weights(model_path)
+    print('A pretrained model loaded from {}'.format(model_path))
 else:
     print('No pretrained model found in gibberish_estimator.h5, training anew')
     ## Read the NKJP fragments, as lists of lemmas
@@ -164,20 +168,9 @@ else:
             except IndexError:
                 break
 
-    model = Sequential()                                                                                               
-    model.add(Embedding(vecs_count,
-                        vecs_dim,
-                        weights=[word_vecs],
-                        input_length=window_size * 2 + 1,
-                        trainable=False))                                                                              
-    model.add(LSTM(96))
-    model.add(Dense(1))
-    model.add(Activation('sigmoid'))
-    opt = SGD(lr=learning_rate, decay=reg_rate)
-    model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
     model.fit(train, labels, batch_size=128, epochs=3)
 
-    model.save(model_filename)
+    model.save(model_path)
     print('New model saved.')
 
     # cleanup to save some memory
@@ -190,7 +183,7 @@ wordnet_xml = etree.parse(pl_wordnet_path)
 
 # Relations we're interested in:
 # only hyper/hyponymy, similarity, synonymy
-rels1 = { '60', '11', '30' }
+rels1 = { '11', '60', '30' }
 # should be rels1 + antonymy and conversion
 rels2 = { '12', '101', '102', '104', '13' }
 # should be rels1 + various meronymies and meronymy-like relations

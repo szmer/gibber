@@ -12,25 +12,26 @@ vecs_path = "/home/szymon/lingwy/nkjp/wektory/nkjp+wiki-lemmas-all-300-cbow-ns-5
 pl_wordnet_path = '/home/szymon/lingwy/wielozn/plwordnet_3_1/plwordnet-3.1.xml'
 
 # model will be either trained and saved to, or loaded from this file (if exists)
-model_path = '../WSD-rew/wsd-nkjp300-weights.h5'
-#model_path = '../WSD-rew/wsd-nkjp1m-weights.h5'
-
-use_pos = False # whether to use POS information for the gibberish estimator (not implemented!)
+#model_path = '../WSD-rew/wsd-nkjp300-weights.h5'
+model_path = '../WSD-rew/wsd-nkjp1m-weights.h5'
 
 #
 # (Experim configuration, ignored by gibber_wsd):
 #
+
 #mode = 'wordnet2_annot'
 mode = 'wordnet3_annot'
-
-transform_lemmas = False # transform lemmas of gerunds from infinitive to gerund form?
 
 full_diagnostics = False # print detailed diagnostics for each prediction case?
 diagnostics_when_23_fails = False # show diagnostics for cases when subset 2 or 3 fails and the 1st is correct
 
+# baseline.py config, ignored by experim.py
+baseline = 'first-variant' # 'random' or 'first-variant'
+
 # If this is not None, four predictions will be printed to CSV files, containing in their
 # columns: lemma, tag, sense variant number, lexical id (ie. Wordnet unit identifier)
 output_prefix = 'wsd_prediction_'
+baseline_output_prefix = 'wsd_baseline'
 
 # only for wordnet2_annot mode
 skladnica_sections_index_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/sections.txt"

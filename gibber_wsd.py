@@ -13,7 +13,7 @@ from keras.layers import Dense, Activation
 from keras.layers import LSTM, Embedding
 from keras.optimizers import SGD
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path, use_pos, transform_lemmas
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path
 
 vecs_dim = 100
 window_size = 4 # how many words to condider on both sides of the target
@@ -199,17 +199,24 @@ rels3 = {'14', '15' # mero/holonymy
 # all relations
 # rels4 is rels2 plus rels3
 
+pos_equivalences = {
+        'czasownik': [ 'fin', 'bedzie', 'aglt', 'praet', 'impt', 'imps', 'inf', 'pcon', 'pant', 'ger', 'pact', 'ppas', 'winien', 'pred', 'qub', 'brev' ],
+        'przymiotnik': [ 'adj', 'adja', 'adjp', 'adjc', 'qub', 'brev' ],
+        'przysłówek': [ 'adv', 'qub', 'brev' ],
+        'rzeczownik': [ 'subst', 'depr', 'ppron12', 'ppron3', 'qub', 'brev' ]
+        }
 
-# NOTE. Theoretically, we have lex_unit ids and synsets given by annotation, but we want
+# NOTE. Theoretically, we can have lex_unit ids and synsets given by annotation, but we want
 # to take into account all possibilities given by raw word forms. Our model will try to
 # **select** the correct lex_unit ids for given form in given context.
 # NOTE 2. We store the bulk of relations in x1 dicts, x2 and x3 store only ones specific to them
 # NOTE 3. "lexical units" and "wordids" in fact relate to distinct senses, as per the Wordnet
 
 skl_word_wordids = defaultdict(list) # word -> ids as list
+# /\ These are only wordids, full symbols are stored in the dict below!
 
-# NOTE 4. We append variant numbers to wordids, as in aaa_111 (see comment in experiment source
-# file
+# NOTE 4. We append POS strings and variant numbers to wordids, as in aaa_POS_111 (optionally
+# just aaa_111 should be equivalent)
 skl_wordid_symbols = dict()
 
 skl_wordid_neighbors1 = defaultdict(list) # lemmas
@@ -231,26 +238,11 @@ def rm_sie(base):
     else:
         return base
 
-if transform_lemmas:
-    morfeusz_generator = pexpect.spawn('morfeusz_generator')
-    pexp_result = morfeusz_generator.expect(['Using dictionary: [^\\n]*$', pexpect.EOF, pexpect.TIMEOUT])
-    if pexp_result != 0:
-        raise RuntimeError('cannot run morfeusz_generator properly')
-
 # Some lemmas mapped into lexical unit of "osoba"
 persons = ['ja', 'ty', 'on', 'ona', 'ono', 'my', 'wy', 'oni', 'one', 'siebie', 'kto', 'któż', 'wszyscy']
 def normalize_lemma(l, tag):
     if l in persons:
         return 'osoba'
-    if transform_lemmas and re.match('^ger:', tag):
-        morfeusz_generator.send(l+'\n')
-        morfeusz_generator.expect(['\\]', pexpect.EOF, pexpect.TIMEOUT])
-        forms = morfeusz_generator.before.decode().strip() # encode from bytes into str, strip whitespace
-        base_form = re.findall('[\\[ ](.*),{}[^,]*,ger:sg:nom\\S*aff'.format(l), forms)
-        if len(base_form) == 0:
-            raise ValueError('cannot obtain gerund base form for {}'.format(l))
-        base_form = base_form[0]
-        return base_form
     return l
 
 def add_word_neighborhoods(words):
@@ -286,7 +278,9 @@ def add_word_neighborhoods(words):
             if form in new_words or rm_sie(form) in new_words:
                 skl_word_wordids[form].append(lex_unit.get('id'))
                 # Preserve the variant number in full symbol.
-                skl_wordid_symbols[lex_unit.get('id')] = lex_unit.get('id')+'_'+lex_unit.get('variant')
+                skl_wordid_symbols[lex_unit.get('id')] = (lex_unit.get('id')
+                                                          +'_'+lex_unit.get('pos')
+                                                          +'_'+lex_unit.get('variant'))
 
         # The r.* dicts are obtained by reversal of their parent dictionary when needed by the neighborhood function.
         # (reverse dict)
@@ -394,16 +388,17 @@ def fill_sample(lemma, sent, token_id):
                                         if token_id+j+1 < len(sent)
                                         else bound_token_id)
 
-def predict_sense(token_lemma, tag, sent, token_id, verbose=False):
+def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_POS=True):
     """Get token_lemma and tag as strings, the whole sent as a sequence of strings, and token_id
     indicating the index where the token is in the sentence. Return decisions made when using
     subsets 1, 2, 3, 4 of relations as tuples (estimated probability, sense, retrieved_sense_count,
     considered_sense_count) or None's if no decision. Retrieved_sense_count indicates how many
     senses were found for the lemma, and considered_sense_count for how many we were able to find
-    a neighborhood with the given subset of relations."""
+    a neighborhood with the given subset of relations. If discriminate_POS is set, only senses
+    of Wordnet POS matching the provided tag will be considered."""
 
     fill_sample(token_lemma, sent, token_id)
-    reference_prob = model.predict(sample)[0][0]
+    reference_prob = model.predict(sample)[0][0] # probability of the sentence fragment with just the original token in center
 
     # For the purpose of finding neighbors, we need to do the adjustments.
     try:
@@ -412,26 +407,39 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False):
         print(ve)
 
     sense_wordids = skl_word_wordids[token_lemma]
+    if discriminate_POS:
+        matching_wordids = []
+        tagset_pos = tag.split(':')[0]
+        for wordid in sense_wordids:
+            wordnet_pos = skl_wordid_symbols[wordid].split('_')[1]
+            if wordnet_pos in pos_equivalences and tagset_pos in pos_equivalences[wordnet_pos]:
+                matching_wordids.append(wordid)
+        sense_wordids = matching_wordids
+
     if len(sense_wordids) == 0:
         sense_wordids = skl_word_wordids[token_lemma + ' się']
         if len(sense_wordids) == 0:
             raise LookupError('no senses found for {}'.format(token_lemma))
 
-    # Neighbors of each sense.
+    # Neighbors of each sense. A sense can have 0 neighbors in some relation set.
     sense_ngbs1 = [set(skl_wordid_neighbors1[swi]) for swi in sense_wordids]
     # Number of neighbors for each sense - important when calculating average for later relation subsets.
     sense_ngbcounts1 = [len(set(skl_wordid_neighbors1[swi])) for swi in sense_wordids]
-    sense_probs1 = [reference_prob for x in sense_wordids] # prefill, maybe will be replaced later
+    sense_probs1 = [reference_prob if (c == 0) else 0.0
+                        for (x, c) in zip(sense_wordids, sense_ngbcounts1)]
     senses_considered1 = 0 # actual number of senses that data allowed us to evaluate
     sense_ngbs2 = [set(skl_wordid_neighbors2[swi]) for swi in sense_wordids]
     sense_ngbcounts2 = [len(set(skl_wordid_neighbors2[swi])) for swi in sense_wordids]
-    sense_probs2 = [reference_prob for x in sense_wordids]
+    sense_probs2 = [reference_prob if (c == 0 and c1 == 0) else 0.0
+                        for (x, c, c1) in zip(sense_wordids, sense_ngbcounts2, sense_ngbcounts1)]
     senses_considered2 = 0
     sense_ngbs3 = [set(skl_wordid_neighbors3[swi]) for swi in sense_wordids]
     sense_ngbcounts3 = [len(set(skl_wordid_neighbors3[swi])) for swi in sense_wordids]
-    sense_probs3 = [reference_prob for x in sense_wordids]
+    sense_probs3 = [reference_prob if (c == 0 and c1 == 0) else 0.0
+                        for (x, c, c1) in zip(sense_wordids, sense_ngbcounts3, sense_ngbcounts1)]
     senses_considered3 = 0
-    sense_probs4 = [reference_prob for x in sense_wordids]
+    sense_probs4 = [reference_prob if (c1 == 0 and c2 == 0 and c3 == 0) else 0.0
+                        for (x, c1, c2, c3) in zip(sense_wordids, sense_ngbcounts1, sense_ngbcounts2, sense_ngbcounts3)]
     senses_considered4 = 0
     
     decision1, decision2, decision3, decision4 = None, None, None, None
@@ -457,14 +465,21 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False):
             if verbose:
                 print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
                                                sense_probs1[sid], ngbs))
+
+        # Get normalized probabilities.
+        normal_sum = sum(sense_probs1)
+        sense_normd_probs = []
+        for prob in sense_probs1:
+            sense_normd_probs.append(prob/normal_sum)
             
-        winners1 = [sid for (sid, p) in enumerate(sense_probs1) if p == max(sense_probs1)]
+        winners1 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
         #print(winners, sense_wordids)
         winner_id = choice(winners1)
         decision1 = skl_wordid_symbols[sense_wordids[winner_id]]
         if verbose:
-            print('The winner is {}'.format(decision1))
-        decision1 = (decision1, sense_probs1[winner_id], len(sense_wordids), senses_considered1)
+            print('Computed probs are {}'.format(sense_normd_probs))
+            print('The winner is {} ({})'.format(decision1, sense_normd_probs[winner_id]))
+        decision1 = (decision1, sense_normd_probs[winner_id], len(sense_wordids), senses_considered1)
     
     # 2nd subset (1+2)
     if sum([len(x) for x in sense_ngbs2]) > 0: # there's a neighbor for at least one sense
@@ -488,13 +503,20 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False):
             if verbose:
                 print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
                                                sense_probs2[sid], ngbs))
+
+        # Get normalized probabilities.
+        normal_sum = sum(sense_probs2)
+        sense_normd_probs = []
+        for prob in sense_probs2:
+            sense_normd_probs.append(prob/normal_sum)
             
-        winners2 = [sid for (sid, p) in enumerate(sense_probs2) if p == max(sense_probs2)]
+        winners2 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
         winner_id = choice(winners2)
         decision2 = skl_wordid_symbols[sense_wordids[winner_id]]
         if verbose:
-            print('The winner is {}'.format(decision2))
-        decision2 = (decision2, sense_probs2[winner_id], len(sense_wordids), senses_considered2)
+            print('Computed probs are {}'.format(sense_normd_probs))
+            print('The winner is {} ({})'.format(decision2, sense_normd_probs[winner_id]))
+        decision2 = (decision2, sense_normd_probs[winner_id], len(sense_wordids), senses_considered2)
            
     # 3rd subset (1+3)
     if sum([len(x) for x in sense_ngbs3]) > 0: # there's a neighbor for at least one sense
@@ -518,13 +540,20 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False):
             if verbose:
                 print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
                                                sense_probs3[sid], ngbs))
+
+        # Get normalized probabilities.
+        normal_sum = sum(sense_probs3)
+        sense_normd_probs = []
+        for prob in sense_probs3:
+            sense_normd_probs.append(prob/normal_sum)
             
-        winners3 = [sid for (sid, p) in enumerate(sense_probs3) if p == max(sense_probs3)]
+        winners3 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
         winner_id = choice(winners3)
         decision3 = skl_wordid_symbols[sense_wordids[winner_id]]
         if verbose:
-            print('The winner is {}'.format(decision3))
-        decision3 = (decision3, sense_probs3[winner_id], len(sense_wordids), senses_considered3)
+            print('Computed probs are {}'.format(sense_normd_probs))
+            print('The winner is {} ({})'.format(decision3, sense_normd_probs[winner_id]))
+        decision3 = (decision3, sense_normd_probs[winner_id], len(sense_wordids), senses_considered3)
             
     # 4th subset (1+2+3)
     if verbose:
@@ -541,11 +570,84 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False):
         if verbose:
             print('* Sense {} ({})'.format(skl_wordid_symbols[sense_wordids[sid]], sense_probs4[sid]))
 
-    winners4 = [sid for (sid, p) in enumerate(sense_probs4) if p == max(sense_probs4)]
+    # Get normalized probabilities.
+    normal_sum = sum(sense_probs4)
+    sense_normd_probs = []
+    for prob in sense_probs4:
+        sense_normd_probs.append(prob/normal_sum)
+
+    winners4 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
     winner_id = choice(winners4)
     decision4 = skl_wordid_symbols[sense_wordids[winner_id]]
     if verbose:
-        print('The winner is {}'.format(decision4))
-    decision4 = (decision4, sense_probs4[winner_id], len(sense_wordids), senses_considered4)
+        print('Computed probs are {}'.format(sense_normd_probs))
+        print('The winner is {} ({})'.format(decision4, sense_normd_probs[winner_id]))
+    decision4 = (decision4, sense_normd_probs[winner_id], len(sense_wordids), senses_considered4)
 
     return (decision1, decision2, decision3, decision4)
+
+def random_prediction(token_lemma, tag, verbose=False, discriminate_POS=True):
+    # For the purpose of finding neighbors, we need to do the adjustments.
+    try:
+        token_lemma = normalize_lemma(token_lemma, tag)
+    except ValueError as ve:
+        print(ve)
+
+    sense_wordids = skl_word_wordids[token_lemma]
+    ###sense_symbols = [skl_wordid_symbols[wid] for wid in sense_wordids]
+    ###print(token_lemma, tag, sense_symbols)
+    if discriminate_POS:
+        matching_wordids = []
+        tagset_pos = tag.split(':')[0]
+        for wordid in sense_wordids:
+            wordnet_pos = skl_wordid_symbols[wordid].split('_')[1]
+            if wordnet_pos in pos_equivalences and tagset_pos in pos_equivalences[wordnet_pos]:
+                matching_wordids.append(wordid)
+        sense_wordids = matching_wordids
+
+    if len(sense_wordids) == 0:
+        sense_wordids = skl_word_wordids[token_lemma + ' się']
+        if len(sense_wordids) == 0:
+            raise LookupError('no senses found for {}'.format(token_lemma))
+
+    sense_symbols = [skl_wordid_symbols[wid] for wid in sense_wordids]
+    winner = choice(sense_symbols)
+    if verbose:
+        print('Among {} the random winner is {}'.format(sense_symbols, winner))
+    return winner
+
+def first_variant_prediction(token_lemma, tag, verbose=False, discriminate_POS=True):
+    # For the purpose of finding neighbors, we need to do the adjustments.
+    try:
+        token_lemma = normalize_lemma(token_lemma, tag)
+    except ValueError as ve:
+        print(ve)
+
+    sense_wordids = skl_word_wordids[token_lemma]
+    if discriminate_POS:
+        matching_wordids = []
+        tagset_pos = tag.split(':')[0]
+        for wordid in sense_wordids:
+            wordnet_pos = skl_wordid_symbols[wordid].split('_')[1]
+            if wordnet_pos in pos_equivalences and tagset_pos in pos_equivalences[wordnet_pos]:
+                matching_wordids.append(wordid)
+        sense_wordids = matching_wordids
+
+    if len(sense_wordids) == 0:
+        sense_wordids = skl_word_wordids[token_lemma + ' się']
+        if len(sense_wordids) == 0:
+            raise LookupError('no senses found for {}'.format(token_lemma))
+
+    sense_symbols = [skl_wordid_symbols[wid] for wid in sense_wordids]
+    winner = None
+    for symb in sense_symbols:
+        if re.search('_1$', symb):
+            winner = symb
+    if verbose:
+        print('Among {} the first-variant winner is {}'.format(sense_symbols, winner))
+    return winner
+
+def sense_match(full, partial):
+    full = full.split('_')
+    lexid, variant = full[0], full[2]
+    return re.match('^({})?_([^_]+_)?({})?$'.format(lexid, variant), partial) is not None

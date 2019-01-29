@@ -190,8 +190,8 @@ else:
 
     model.fit(train, labels, batch_size=128, epochs=3)
 
-    model.save(model_path)
-    print('New model saved.')
+    model.save_weights(model_path)
+    print('New model weights saved.')
 
     # cleanup to save some memory
     train, labels = None, None

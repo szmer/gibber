@@ -13,7 +13,7 @@ from keras.layers import Dense, Activation
 from keras.layers import LSTM, Embedding
 from keras.optimizers import SGD
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path, POS_extended_model
 
 vecs_dim = 100
 window_size = 4 # how many words to condider on both sides of the target
@@ -21,6 +21,22 @@ batch_size = window_size * 2 # for training of gibberish discriminator in Keras
 learning_rate = 0.3
 reg_rate = 0.005 # regularization
 corp_runs = 2 # how many times to feed the whole corpus during training
+
+#
+# POS groups for constructing extended lemmas when using a POS-aware model.
+#
+# If POS_extended_model is set to True, when training the model all lemmas will be
+# converted to their extended form, and during prediction -- only when they're being
+# fed to the model.
+pos_groups = { 'subst': 'S', 'depr': 'S', 'brev': 'S',
+               'fin': 'V', 'bedzie': 'V', 'aglt': 'V', 'praet': 'V', 'impt': 'V', 'imps': 'V', 'inf': 'V', 'pcon': 'V', 'pant': 'V', 'ger': 'V', 'pact': 'V', 'ppas': 'V', 'winien': 'V',
+               'adj': 'A', 'adja': 'A', 'adjp': 'A', 'adjc': 'A'
+        }
+def POS_extended_lemma(lemma, tag):
+    tag_pos = tag.split(':')[0]
+    if tag_pos in pos_groups:
+        return lemma+':'+pos_groups[tag_pos]
+    return lemma
 
 #
 ## Get word vectors
@@ -34,7 +50,7 @@ idx_to_word = {}
 vecs_count = 0
 vecs_dim = 0
 
-print('Loading word vectors.')
+print('Loading word vectors from {}.'.format(vecs_path))
 # Get the vector word labels (we'll get vectors themselves in a moment).
 with open(vecs_path) as vecs_file:
     for line in vecs_file:
@@ -90,6 +106,8 @@ else:
     train_sents = []
 
     if nkjp_format == 'plain':
+        if POS_extended_model:
+            raise ValueError('Cannot train a POS-extended model from plain corpus format.')
         with open(nkjp_index_path) as corp_file:
             for line in corp_file:
                 lemmas = line.strip().split()
@@ -112,7 +130,9 @@ else:
                             continue
                         interp = seg.find('.//{http://www.tei-c.org/ns/1.0}string').text.split(':')
                         lemma = interp[0].lower()
-                        #tag = ':'.join(interp[1:])
+                        tag = ':'.join(interp[1:])
+                        if POS_extended_model:
+                            lemma = POS_extended_lemma(lemma, tag)
                         sent_lemmas.append(lemma)
                     train_sents += [[]]
                     for word in sent_lemmas:
@@ -199,6 +219,7 @@ rels3 = {'14', '15' # mero/holonymy
 # all relations
 # rels4 is rels2 plus rels3
 
+# POS equivalences for mapping NKJP tagset to Wordnet POS.
 pos_equivalences = {
         'czasownik': [ 'fin', 'bedzie', 'aglt', 'praet', 'impt', 'imps', 'inf', 'pcon', 'pant', 'ger', 'pact', 'ppas', 'winien', 'pred', 'qub', 'brev' ],
         'przymiotnik': [ 'adj', 'adja', 'adjp', 'adjc', 'qub', 'brev' ],
@@ -397,7 +418,10 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
     a neighborhood with the given subset of relations. If discriminate_POS is set, only senses
     of Wordnet POS matching the provided tag will be considered."""
 
-    fill_sample(token_lemma, sent, token_id)
+    if POS_extended_model:
+        fill_sample(POS_extended_lemma(token_lemma, tag), sent, token_id)
+    else:
+        fill_sample(token_lemma, sent, token_id)
     reference_prob = model.predict(sample)[0][0] # probability of the sentence fragment with just the original token in center
 
     # For the purpose of finding neighbors, we need to do the adjustments.
@@ -456,15 +480,17 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                 continue
             senses_considered1 += 1
             for ngb_word in ngbs:
-                fill_sample(ngb_word, sent, token_id)
+                if POS_extended_model: # assume the same tag/POS as target
+                    fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
+                else:
+                    fill_sample(ngb_word, sent, token_id)
                 sense_probs1[sid] += model.predict(sample)[0][0]
                 
             # We have average prob of any neighbor of this sense
             sense_probs1[sid] /= sense_ngbcounts1[sid]
 
             if verbose:
-                print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
-                                               sense_probs1[sid], ngbs))
+                print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
 
         # Get normalized probabilities.
         normal_sum = sum(sense_probs1)
@@ -493,7 +519,10 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                 continue
             senses_considered2 += 1
             for ngb_word in ngbs:
-                fill_sample(ngb_word, sent, token_id)
+                if POS_extended_model: # assume the same tag/POS as target
+                    fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
+                else:
+                    fill_sample(ngb_word, sent, token_id)
                 sense_probs2[sid] += model.predict(sample)[0][0]
             # We have average prob of any neighbor of this sense + carry the input from "1"
             # (note that it can be ignored due to zero neighbors)
@@ -501,8 +530,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                                 / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid]))
 
             if verbose:
-                print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
-                                               sense_probs2[sid], ngbs))
+                print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
 
         # Get normalized probabilities.
         normal_sum = sum(sense_probs2)
@@ -530,7 +558,10 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                 continue
             senses_considered3 += 1
             for ngb_word in ngbs:
-                fill_sample(ngb_word, sent, token_id)
+                if POS_extended_model: # assume the same tag/POS as target
+                    fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
+                else:
+                    fill_sample(ngb_word, sent, token_id)
                 sense_probs3[sid] += model.predict(sample)[0][0]
             # We have average prob of any neighbor of this sense + carry the input from "1"
             # (note that it can be ignored due to zero neighbors)
@@ -538,8 +569,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                                 / (sense_ngbcounts1[sid] + sense_ngbcounts3[sid]))
 
             if verbose:
-                print('* Sense {} ({}): {}'.format(skl_wordid_symbols[sense_wordids[sid]],
-                                               sense_probs3[sid], ngbs))
+                print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
 
         # Get normalized probabilities.
         normal_sum = sum(sense_probs3)
@@ -568,7 +598,8 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                             / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid] + sense_ngbcounts3[sid]))
 
         if verbose:
-            print('* Sense {} ({})'.format(skl_wordid_symbols[sense_wordids[sid]], sense_probs4[sid]))
+            print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]],
+                                          list(sense_ngbs1[sid]) + list(sense_ngbs2[sid]) + list(sense_ngbs3[sid])))
 
     # Get normalized probabilities.
     normal_sum = sum(sense_probs4)

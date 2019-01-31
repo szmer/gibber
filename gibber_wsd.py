@@ -13,14 +13,9 @@ from keras.layers import Dense, Activation
 from keras.layers import LSTM, Embedding
 from keras.optimizers import SGD
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path, POS_extended_model
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model
 
-vecs_dim = 100
-window_size = 4 # how many words to condider on both sides of the target
 batch_size = window_size * 2 # for training of gibberish discriminator in Keras
-learning_rate = 0.3
-reg_rate = 0.005 # regularization
-corp_runs = 2 # how many times to feed the whole corpus during training
 
 #
 # POS groups for constructing extended lemmas when using a POS-aware model.

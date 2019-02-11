@@ -1,0 +1,64 @@
+If you want to run prepared experiments, review oprions in wsd_config.py and run
+experim.py (`python experim.py` or `python3 experim.py` depending on your
+environment).
+
+This document describes how to use `gibber_wsd` package.
+
+> from gibber_wsd import add_word_neighborhoods, predict_sense
+> add_word_neighborhoods(words_and_tags) # a collection of (lemma, tag) pairs
+> predict_sense('uprzytomnić', 'ger:sg:acc:n:perf:aff', ['na', 'ten', 'uprzytomnić', 'dusza', 'pan', 'sapieha', 'wyjść', 'z', 'ciało', 'i', 'jąć', 'prosić', 'bóg', 'o', 'rychły', 'śmierć', ',', 'by', 'prędko', 'ten', 'szczęście', 'dostąpić', '.', '.', '.'], 2)
+(('9460_1', 0.6460520029067993, 1, 1), None, None, ('9460_1', 0.6460520029067993, 1, 1))
+
+See below for explanation.
+
+NOTE it is required to first call `add_word_neighborhoods` on words you wish to
+disambiguate. This retrieves necessary information from Wordnet XML. It is best,
+whenever possible, to call this function on all the words you'll want to process
+at once.
+
+Configuration
+-------------
+
+See the file wsd_config in this directory.
+
+nkjp_index_path - path to list of NKJP corpus directories, each in new line 
+                  (a list for NKJP1M provided in this package).
+nkjp_path - path to NKJP corpus, as downloadable from the corpus site.
+vecs_path - path to word vectors to be used in WSD model; downloadable from
+            http://dsmodels.nlp.ipipan.waw.pl/.
+pl_wordnet_file - path to Wordnet XML.
+
+
+Conventions
+-----------
+Lemmas should be converted to lowercase.
+
+For referring to wordnet senses, we use a convention of symbols aaa_111, where
+aaa is the lexical id, and 111 is the variant number. If one of these is empty
+(as it is in the loaded sense-annotated data), it is enough for the other
+information to match. The `predict_senses` function will return full information.
+
+Relation subsets
+----------------
+The `predict_sense` returns a tuple of decisions made by taking into account
+various subsets of Wordnet relations when collecting word neighborhoods. Broadly
+speaking, they can be described this way:
+1 - synonymy.
+2 - synonymy and antonymy.
+3 - synonymy and meronymy(-like) relations.
+4 - all of the above.
+
+Functions
+---------
+
+add_word_neighborhoods(words):
+    """Retrieve neighbor senses from Wordnet for all given (lemma, tag) pairs and store them
+    in internal representation for later prediction."""
+
+predict_sense(token_lemma, tag, sent, token_id):
+    """Get token_lemma and tag as strings, the whole sent as a sequence of strings, and token_id
+    indicating the index where the token is in the sentence. Return decisions made when using
+    subsets 1, 2, 3, 4 of relations as tuples (estimated probability, sense, retrieved_sense_count,
+    considered_sense_count) or None's if no decision. Retrieved_sense_count indicates how many
+    senses were found for the lemma, and considered_sense_count for how many we were able to find
+    a neighborhood with the given subset of relations."""

@@ -1,8 +1,6 @@
 import os, csv, re
 from itertools import chain
 
-from lxml import etree
-
 from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, full_diagnostics, diagnostics_when_23_fails, pl_wordnet_path
 from gibber_wsd import add_word_neighborhoods, fill_sample, predict_sense, sense_match
 import gibber_wsd

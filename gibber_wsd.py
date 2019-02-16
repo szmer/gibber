@@ -7,15 +7,15 @@ from random import choice
 from lxml import etree
 
 import numpy as np
-from keras.models import load_model
-from keras.models import Sequential
-from keras.layers import Dense, Activation
-from keras.layers import LSTM, Embedding
-from keras.optimizers import SGD
+import torch
+from torch.autograd import Variable
+from torch import nn
+import torch.utils.data
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, vecs_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda
+from gibberish_estimator import GibberishEstimator
 
-batch_size = window_size * 2 # for training of gibberish discriminator in Keras
+batch_size = window_size * 2 # for training of gibberish discriminator in Torch
 
 #
 # POS groups for constructing extended lemmas when using a POS-aware model.
@@ -80,22 +80,19 @@ bound_token_id = vecs_count - 1 # the zero additional vector
 ## Load or train the model for estimating 'gibberish'.
 #
 
-model = Sequential()                                                                                               
-model.add(Embedding(vecs_count,
-                    vecs_dim,
-                    weights=[word_vecs],
-                    input_length=window_size * 2 + 1,
-                    trainable=False))                                                                              
-model.add(LSTM(96))
-model.add(Dense(1))
-model.add(Activation('sigmoid'))
-opt = SGD(lr=learning_rate, decay=reg_rate)
-model.compile(loss='binary_crossentropy', optimizer=opt, metrics=['accuracy'])
+embedding = nn.Embedding.from_pretrained(torch.FloatTensor(word_vecs), freeze=freeze_embeddings)
+model = GibberishEstimator(embedding, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, use_cuda=use_cuda)
+if use_cuda:
+    model = model.cuda()
+
+optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=learning_rate, weight_decay=reg_rate)
+loss = torch.nn.BCELoss() # binary cross-entropy
+
 if os.path.isfile(model_path):
-    model.load_weights(model_path)
+    model.load_state_dict(torch.load(model_path))
     print('A pretrained model loaded from {}'.format(model_path))
 else:
-    print('No pretrained model found in gibberish_estimator.h5, training anew')
+    print('No pretrained model found in {}, training anew'.format(model_path))
     ## Read the NKJP fragments, as lists of lemmas
     words_count = 0
     train_sents = []
@@ -134,7 +131,7 @@ else:
                         train_sents[-1].append(word)
                         words_count += 1
 
-    ### Keras - training the "language/gibberish discriminator"
+    ### Torch - training the "language/gibberish discriminator"
 
     ##
     ## Training corpus preparation.
@@ -183,9 +180,23 @@ else:
             except IndexError:
                 break
 
-    model.fit(train, labels, batch_size=128, epochs=3)
+    train_set = torch.utils.data.TensorDataset(torch.LongTensor(train), torch.Tensor(labels))
+    batch_size = 128
+    batch_maker = torch.utils.data.DataLoader(train_set, batch_size=batch_size)
+    for epoch_n in range(corp_runs):
+        for i, batch in enumerate(batch_maker):
+            samples, labels = batch
+            if use_cuda:
+                labels = labels.cuda() # the model will take care of samples
+            samples, labels = Variable(samples), Variable(labels).view(labels.size(0), 1)
+            predictions = model(samples)
+            loss_val = loss(predictions, labels)
+            loss_val.backward()
+            optimizer.step()
+            if i % 50 == 0:
+                print('Loss at batch {}: {}'.format(i, float(loss_val.item())))
 
-    model.save_weights(model_path)
+    torch.save(model.state_dict(), model_path)
     print('New model weights saved.')
 
     # cleanup to save some memory
@@ -417,7 +428,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
         fill_sample(POS_extended_lemma(token_lemma, tag), sent, token_id)
     else:
         fill_sample(token_lemma, sent, token_id)
-    reference_prob = model.predict(sample)[0][0] # probability of the sentence fragment with just the original token in center
+    reference_prob = model(torch.LongTensor(sample)).detach().cpu() # probability of the sentence fragment with just the original token in center
 
     # For the purpose of finding neighbors, we need to do the adjustments.
     try:
@@ -479,7 +490,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                     fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
                 else:
                     fill_sample(ngb_word, sent, token_id)
-                sense_probs1[sid] += model.predict(sample)[0][0]
+                sense_probs1[sid] += model(torch.LongTensor(sample)).detach().cpu()
                 
             # We have average prob of any neighbor of this sense
             sense_probs1[sid] /= sense_ngbcounts1[sid]
@@ -493,7 +504,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
         for prob in sense_probs1:
             sense_normd_probs.append(prob/normal_sum)
             
-        winners1 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
+        winners1 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)] # max seems to handle singleton tensors OK
         #print(winners, sense_wordids)
         winner_id = choice(winners1)
         decision1 = skl_wordid_symbols[sense_wordids[winner_id]]
@@ -518,7 +529,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                     fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
                 else:
                     fill_sample(ngb_word, sent, token_id)
-                sense_probs2[sid] += model.predict(sample)[0][0]
+                sense_probs2[sid] += model(torch.LongTensor(sample)).detach().cpu()
             # We have average prob of any neighbor of this sense + carry the input from "1"
             # (note that it can be ignored due to zero neighbors)
             sense_probs2[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid]) + sense_probs2[sid])
@@ -557,7 +568,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                     fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
                 else:
                     fill_sample(ngb_word, sent, token_id)
-                sense_probs3[sid] += model.predict(sample)[0][0]
+                sense_probs3[sid] += model(torch.LongTensor(sample)).detach().cpu()
             # We have average prob of any neighbor of this sense + carry the input from "1"
             # (note that it can be ignored due to zero neighbors)
             sense_probs3[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid]) + sense_probs3[sid])

@@ -13,18 +13,20 @@ vecs_path = "../WSD-new/nkjp+wiki-lemmas-pos-cbow-ns-50.txt"
 pl_wordnet_path = "/home/szymon/lingwy/wielozn/plwordnet_3_1/plwordnet-3.1.xml"
 
 # model will be either trained and saved to, or loaded from this file (if exists)
-model_path = 'nkjp1m_nopos_3eps.torch'
+model_path = 'nkjp1m_nopos_elmo.torch'
 #model_path = "../WSD-rew/wsd-nkjp1m-pos-weights.h5"
 #model_path = "../WSD-rew/wsd-nkjp300-pos-weights.h5"
 #model_path = "../WSD-rew/wsd-nkjp300-weights.h5"
 #model_path = "../WSD-rew/wsd-nkjp1m-weights.h5"
 
+ELMo_model_path = '/home/szymon/lingwy/elmo/pl_elmo' # can be False if you don't want to use ELMo, not compatible with POS extension, elmoformanylangs package needed
 POS_extended_model = False
 
 # model training settings:
 use_cuda = True
 window_size = 4 # how many words to consider on both sides of the target
 corp_runs = 2 # how many times to feed the whole corpus during training
+
 learning_rate = 0.3
 reg_rate = 0.005 # regularization
 lstm_hidden_size = 9

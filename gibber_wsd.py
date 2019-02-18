@@ -1,4 +1,4 @@
-import os, pexpect, re
+import os, pexpect, re, logging
 
 from random import randint, shuffle, choice
 from math import floor
@@ -11,8 +11,9 @@ from torch.autograd import Variable
 from torch import nn
 import torch.utils.data
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count
 from gibberish_estimator import GibberishEstimator
+from mixed_dataset import MixedDataset
 
 if ELMo_model_path and POS_extended_model:
     raise Exception('Cannot combine ELMo with a POS-extended model.')
@@ -49,13 +50,13 @@ def words_window(sent_tokens, tid, replace_target = False):
 
 if ELMo_model_path:
     import elmoformanylangs
-    from mixed_dataset import MixedDataset
+    logging.disable(logging.WARNING) # stop ELMo for printing out loads of stuff to the console
     embedding = elmoformanylangs.Embedder(ELMo_model_path)
     print('ELMo model loaded from {}'.format(ELMo_model_path))
 else:
     import word_embeddings
     embedding = nn.Embedding.from_pretrained(torch.FloatTensor(word_embeddings.word_vecs), freeze=freeze_embeddings)
-    from word_embeddings import word_id
+    from word_embeddings import word_id, bound_token_id, vecs_dim, vecs_count
 
 #
 ## Load or train the model for estimating 'gibberish'.
@@ -199,9 +200,9 @@ else:
                 except IndexError:
                     break
 
-        train_set = MixedDataset(torch.LongTensor(train), torch.Tensor(labels))
+        train_set = MixedDataset(batch_size, torch.LongTensor(train), torch.Tensor(labels))
 
-    for epoch_n in range(corp_runs):
+    for epoch_n in range(epochs_count):
         for i, batch in enumerate(train_set):
             samples, labels = batch
             if use_cuda:
@@ -508,19 +509,22 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
             if len(ngbs) == 0:
                 continue
             senses_considered1 += 1
-            for ngb_word in ngbs:
-                if ELMo_model_path:
-                    sense_probs1[sid] += model([words_window(sent, token_id,
-                                               replace_target=ngb_word)]).detach().cpu()
-                else:
+            if ELMo_model_path:
+                # Send ngb_words in bulk to the model and then populate sense_probs.
+                probs = model([words_window(sent, token_id,
+                                           replace_target=ngb_word)
+                                           for ngb_word in ngbs]).detach().cpu().numpy()
+                sense_probs1[sid] = float(np.mean(probs))
+            else:
+                for ngb_word in ngbs:
                     if POS_extended_model: # assume the same tag/POS as target
                         fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
                     else:
                         fill_sample(ngb_word, sent, token_id)
                     sense_probs1[sid] += model(torch.LongTensor(sample)).detach().cpu()
-                
-            # We have average prob of any neighbor of this sense
-            sense_probs1[sid] /= sense_ngbcounts1[sid]
+ 
+                # We have average prob of any neighbor of this sense
+                sense_probs1[sid] /= sense_ngbcounts1[sid]
 
             if verbose:
                 print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
@@ -551,19 +555,26 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                     senses_considered2 += 1 # it also counts as "considered"
                 continue
             senses_considered2 += 1
-            for ngb_word in ngbs:
-                if ELMo_model_path:
-                    sense_probs2[sid] += model([words_window(sent, token_id,
-                                               replace_target=ngb_word)]).detach().cpu()
-                else:
+            if ELMo_model_path:
+                # Send ngb_words in bulk to the model and then populate sense_probs.
+                probs = model([words_window(sent, token_id,
+                                           replace_target=ngb_word)
+                                           for ngb_word in ngbs]).detach().cpu().numpy()
+                sense_probs2[sid] = float(np.mean(probs))
+            else:
+                for ngb_word in ngbs:
                     if POS_extended_model: # assume the same tag/POS as target
                         fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
                     else:
                         fill_sample(ngb_word, sent, token_id)
                     sense_probs2[sid] += model(torch.LongTensor(sample)).detach().cpu()
+ 
+                # We have average prob of any neighbor of this sense
+                sense_probs2[sid] /= sense_ngbcounts2[sid]
             # We have average prob of any neighbor of this sense + carry the input from "1"
             # (note that it can be ignored due to zero neighbors)
-            sense_probs2[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid]) + sense_probs2[sid])
+            sense_probs2[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid])
+                                       + sense_probs2[sid] * sense_ngbcounts2[sid])
                                 / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid]))
 
             if verbose:
@@ -594,19 +605,26 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                     senses_considered3 += 1
                 continue
             senses_considered3 += 1
-            for ngb_word in ngbs:
-                if ELMo_model_path:
-                    sense_probs3[sid] += model([words_window(sent, token_id,
-                                               replace_target=ngb_word)]).detach().cpu()
-                else:
+            if ELMo_model_path:
+                # Send ngb_words in bulk to the model and then populate sense_probs.
+                probs = model([words_window(sent, token_id,
+                                           replace_target=ngb_word)
+                                           for ngb_word in ngbs]).detach().cpu().numpy()
+                sense_probs3[sid] = float(np.mean(probs))
+            else:
+                for ngb_word in ngbs:
                     if POS_extended_model: # assume the same tag/POS as target
                         fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
                     else:
                         fill_sample(ngb_word, sent, token_id)
                     sense_probs3[sid] += model(torch.LongTensor(sample)).detach().cpu()
+ 
+                # We have average prob of any neighbor of this sense
+                sense_probs3[sid] /= sense_ngbcounts3[sid]
             # We have average prob of any neighbor of this sense + carry the input from "1"
             # (note that it can be ignored due to zero neighbors)
-            sense_probs3[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid]) + sense_probs3[sid])
+            sense_probs3[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid])
+                                       + sense_probs3[sid] * sense_ngbcounts3[sid])
                                 / (sense_ngbcounts1[sid] + sense_ngbcounts3[sid]))
 
             if verbose:

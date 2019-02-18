@@ -1,4 +1,5 @@
 from wsd_config import vecs_path
+import numpy as np
 
 first_line = True
 word_n = 0

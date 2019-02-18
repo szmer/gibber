@@ -7,7 +7,7 @@ nkjp_index_path = "nkjp_index.txt" # only when "corpus"
 nkjp_path = "./NKJP-1M/NKJP1M.txt"
 #nkjp_path = "/home/szymon/lingwy/nkjp/pełny/" # directory when "corpus", else a text file
 
-#vecs_path = "../WSD-dostane/nkjp+wiki-lemmas-all-300-cbow-ns-50.txt"
+#vecs_path = "../WSD-dostane/nkjp+wiki-lemmas-all-300-cbow-ns-50.txt"  # meaningless when using ELMo
 vecs_path = "../WSD-new/nkjp+wiki-lemmas-pos-cbow-ns-50.txt"
 #pl_wordnet_path = "/home/szymon/lingwy/wielozn/wzięte/plwordnet_2_0_4/plwordnet_2_0_4_release/plwordnet_2_0.xml"
 pl_wordnet_path = "/home/szymon/lingwy/wielozn/plwordnet_3_1/plwordnet-3.1.xml"
@@ -26,6 +26,7 @@ POS_extended_model = False
 use_cuda = True
 window_size = 4 # how many words to consider on both sides of the target
 corp_runs = 2 # how many times to feed the whole corpus during training
+epochs_count = 3
 
 learning_rate = 0.3
 reg_rate = 0.005 # regularization

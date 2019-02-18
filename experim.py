@@ -86,7 +86,8 @@ if output_prefix is not None:
     out4 = open(output_prefix+'4', 'w+')
 
 print('Performing the test on sense-annotated sentences.')
-for sent in sents:
+for (sid, sent) in enumerate(sents):
+    print('Testing sentence', sid+1)
     for (tid, token_data) in enumerate(sent):
         lemma, true_sense, tag = token_data[0], token_data[1], token_data[2]
         if true_sense is None:

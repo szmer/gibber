@@ -40,6 +40,8 @@ freeze_embeddings = True
 #lstm_is_bidirectional = False
 #freeze_embeddings = True
 
+concraft_model_path = '/home/szymon/lingwy/concraft/model-04-09-2018.gz'
+
 #
 # (Experim configuration, ignored by gibber_wsd):
 #

@@ -7,19 +7,18 @@ nkjp_index_path = "nkjp_index.txt" # only when "corpus"
 nkjp_path = "./NKJP-1M/NKJP1M.txt"
 #nkjp_path = "/home/szymon/lingwy/nkjp/pełny/" # directory when "corpus", else a text file
 
-#vecs_path = "../WSD-dostane/nkjp+wiki-lemmas-all-300-cbow-ns-50.txt"  # meaningless when using ELMo
-vecs_path = "../WSD-new/nkjp+wiki-lemmas-pos-cbow-ns-50.txt"
+vecs_path = "../WSD-dostane/nkjp+wiki-lemmas-all-300-cbow-ns-50.txt"  # meaningless when using ELMo
+#vecs_path = "../WSD-new/nkjp+wiki-lemmas-pos-cbow-ns-50.txt"
 #pl_wordnet_path = "/home/szymon/lingwy/wielozn/wzięte/plwordnet_2_0_4/plwordnet_2_0_4_release/plwordnet_2_0.xml"
 pl_wordnet_path = "/home/szymon/lingwy/wielozn/plwordnet_3_1/plwordnet-3.1.xml"
 
-# model will be either trained and saved to, or loaded from this file (if exists)
-model_path = 'nkjp1m_nopos_elmo.torch'
-#model_path = "../WSD-rew/wsd-nkjp1m-pos-weights.h5"
-#model_path = "../WSD-rew/wsd-nkjp300-pos-weights.h5"
-#model_path = "../WSD-rew/wsd-nkjp300-weights.h5"
-#model_path = "../WSD-rew/wsd-nkjp1m-weights.h5"
+use_descriptions = True # include Wordnet unit descriptions in testing?
+concraft_model_path = '/home/szymon/lingwy/concraft/model-04-09-2018.gz'
 
-ELMo_model_path = '/home/szymon/lingwy/elmo/pl_elmo' # can be False if you don't want to use ELMo, not compatible with POS extension, elmoformanylangs package needed
+# model will be either trained and saved to, or loaded from this file (if exists)
+model_path = 'nkjp1m_nopos.torch'
+
+ELMo_model_path = False#'/home/szymon/lingwy/elmo/pl_elmo' # can be False if you don't want to use ELMo, not compatible with POS extension, elmoformanylangs package needed
 POS_extended_model = False
 
 # model training settings:
@@ -39,8 +38,6 @@ freeze_embeddings = True
 #lstm_layers_count = 1
 #lstm_is_bidirectional = False
 #freeze_embeddings = True
-
-concraft_model_path = '/home/szymon/lingwy/concraft/model-04-09-2018.gz'
 
 #
 # (Experim configuration, ignored by gibber_wsd):

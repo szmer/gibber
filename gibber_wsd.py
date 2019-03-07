@@ -1,19 +1,22 @@
 import os, pexpect, re, logging
-
 from random import randint, shuffle, choice
 from math import floor
 from collections import defaultdict
-from lxml import etree
+from itertools import chain
 
+from lxml import etree
 import numpy as np
 import torch
 from torch.autograd import Variable
 from torch import nn
 import torch.utils.data
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions 
 from gibberish_estimator import GibberishEstimator
 from mixed_dataset import MixedDataset
+
+if use_descriptions:
+    import pl_parsing # runs Morfeusz analyzer in background
 
 if ELMo_model_path and POS_extended_model:
     raise Exception('Cannot combine ELMo with a POS-extended model.')
@@ -271,6 +274,8 @@ skl_wordid_neighbors1 = defaultdict(list) # lemmas
 skl_wordid_neighbors2 = defaultdict(list)
 skl_wordid_neighbors3 = defaultdict(list)
 
+skl_wordid_descs = dict() # here we store raw desc strings if we use them (see config)
+
 # go from "a => [v1, v2 ... ]" to "v1 => [ a ... ], v2 => [ a ... ] ..."
 def reverse_list_dict(dic):
     new_dic = defaultdict(list)
@@ -329,6 +334,8 @@ def add_word_neighborhoods(words):
                 skl_wordid_symbols[lex_unit.get('id')] = (lex_unit.get('id')
                                                           +'_'+lex_unit.get('pos')
                                                           +'_'+lex_unit.get('variant'))
+                if use_descriptions:
+                    skl_wordid_descs[lex_unit.get('id')] = lex_unit.get('desc')
 
         # The r.* dicts are obtained by reversal of their parent dictionary when needed by the neighborhood function.
         # (reverse dict)
@@ -673,6 +680,61 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
         print('Computed probs are {}'.format(sense_normd_probs))
         print('The winner is {} ({})'.format(decision4, sense_normd_probs[winner_id]))
     decision4 = (decision4, sense_normd_probs[winner_id], len(sense_wordids), senses_considered4)
+
+    # Optional run with descriptions.
+    if use_descriptions:
+        if verbose:
+            print('# Descriptions ("subset 5").')
+
+        sense_probs5 = [reference_prob for s in sense_wordids]
+        senses_considered5 = 0
+
+        for sense_n, wordid in enumerate(sense_wordids):
+            samples_str = pl_parsing.extract_samples(skl_wordid_descs[wordid]).strip()
+            if len(samples_str) == 0:
+                continue
+            desc_tokens = chain.from_iterable(pl_parsing.parse_sentences(samples_str)) # merge sentences
+            desc_lemmas = [lemma for (form, lemma, interp) in desc_tokens]
+            if len(desc_lemmas) == 0:
+                continue
+
+            senses_considered5 += 1
+            if ELMo_model_path:
+                # Send desc_lemmas in bulk to the model and then populate sense_probs.
+                probs = model([words_window(sent, token_id, replace_target=desc_lemma)
+                                           for desc_lemma in desc_lemmas]).detach().cpu().numpy()
+                sense_probs5[sense_n] = float(np.mean(probs))
+            else:
+                sense_probs5[sense_n] = 0.0 # reset for adding there below
+                for desc_lemma in desc_lemmas:
+                    if POS_extended_model: # assume the same tag/POS as target
+                        fill_sample(POS_extended_lemma(desc_lemma, tag), sent, token_id)
+                    else:
+                        fill_sample(desc_lemma, sent, token_id)
+                    sense_probs5[sense_n] += model(torch.LongTensor(sample)).detach().cpu()
+ 
+                # We have average prob of any neighbor of this sense
+                sense_probs5[sense_n] /= len(desc_lemmas)
+
+            if verbose:
+                print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sense_n]], ngbs))
+
+        # Get normalized probabilities.
+        normal_sum = sum(sense_probs5)
+        sense_normd_probs = []
+        for prob in sense_probs5:
+            sense_normd_probs.append(prob/normal_sum)
+            
+        winners5 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)] # max seems to handle singleton tensors OK
+        #print(winners, sense_wordids)
+        winner_id = choice(winners5)
+        decision5 = skl_wordid_symbols[sense_wordids[winner_id]]
+        if verbose:
+            print('Computed probs are {}'.format(sense_normd_probs))
+            print('The winner is {} ({})'.format(decision5, sense_normd_probs[winner_id]))
+        decision5 = (decision5, sense_normd_probs[winner_id], len(sense_wordids), senses_considered5)
+
+        return (decision1, decision2, decision3, decision4, decision5)
 
     return (decision1, decision2, decision3, decision4)
 

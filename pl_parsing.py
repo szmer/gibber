@@ -6,8 +6,6 @@ from wsd_config import concraft_model_path
 
 def parse_morfeusz_output(morfeusz_str):
     # replace unwieldy special characters to make parsing reliable
-    ###morfeusz_str = re.sub('([\\[,])\\[(?=,)', '\\1MORFEUSZ_LEFT_SQUARE_BRACKET', morfeusz_str)
-    ###morfeusz_str = re.sub('([\\[,])\\](?=,)', '\\1MORFEUSZ_RIGHT_SQUARE_BRACKET', morfeusz_str)
     morfeusz_str = re.sub(',,', ',MORFEUSZ_COMMA', morfeusz_str)
     morfeusz_str = re.sub('\\.,', 'MORFEUSZ_DOT,', morfeusz_str)
 
@@ -40,6 +38,27 @@ def parse_morfeusz_output(morfeusz_str):
         parsed_sections.append(parsed_nodes)
     return parsed_sections
 
+def split_morfeusz_sents(morfeusz_nodes):
+    """Given an output from parse_morfeusz_output, return it as a list of sentences."""
+    sent_boundaries = [0]
+    previous_brev = False
+    for (node_n, node) in enumerate(morfeusz_nodes):
+        current_brev = False
+        for variant in node:
+            if 'brev' in variant[4]:
+                previous_brev = True
+                current_brev = True
+            if variant[2] == '.' and not previous_brev:
+                sent_boundaries.append(node_n+1)
+        if not current_brev:
+            previous_brev = False
+    sent_boundaries.append(len(morfeusz_nodes))
+    sents = []
+    for (bnd_n, bnd) in enumerate(sent_boundaries[1:]):
+        sents.append(morfeusz_nodes[sent_boundaries[bnd_n-1]:bnd])
+    sents = [s for s in sents if len(s) > 0]
+    return sents
+
 def write_dag_from_morfeusz(path, morfeusz_nodes):
     with open(path, 'w+') as out:
         for (node_n, node) in enumerate(morfeusz_nodes):
@@ -69,16 +88,36 @@ pexp_result = morfeusz_analyzer.expect(['Using dictionary: [^\\n]*$', pexpect.EO
 if pexp_result != 0:
     raise RuntimeError('cannot run morfeusz_analyzer properly')
 
-def parse_sentence(sent):
-    """Use Morfeusz and Concraft to obtain the sentence as a list of (form, lemma, interp)"""
-    morfeusz_analyzer.send(sent+' KONIECKONIEC\n')
+def parse_sentences(sents_str):
+    """Use Morfeusz and Concraft to obtain the sentences as lists of (form, lemma, interp)"""
+    morfeusz_analyzer.send(sents_str+' KONIECKONIEC\n')
     pexp_result = morfeusz_analyzer.expect(['\r\n\\[\\d+,\\d+,KONIECKONIEC,KONIECKONIEC,ign,_,_\\]\r\n', pexpect.EOF, pexpect.TIMEOUT])
     if pexp_result != 0:
         raise RuntimeError('there was a Morfeusz error: {}'.format(morfeusz_analyzer.before))
     morfeusz_interp = morfeusz_analyzer.before.decode().strip() # encode from bytes into str, strip whitespace
     morfeusz_interp = morfeusz_interp[morfeusz_interp.index('['):]
     parsed_nodes = parse_morfeusz_output(morfeusz_interp)
-    write_dag_from_morfeusz('MORFEUSZ_CONCRAFT_TEMP', parsed_nodes)
-    parsed_sent = parse_concraft_output('MORFEUSZ_CONCRAFT_TEMP')
-    os.remove('MORFEUSZ_CONCRAFT_TEMP')
-    return parsed_sent
+
+    morfeusz_sentences = split_morfeusz_sents(parsed_nodes)
+    parsed_sents = []
+    for morf_sent in morfeusz_sentences:
+        write_dag_from_morfeusz('MORFEUSZ_CONCRAFT_TEMP', morf_sent)
+        parsed_sent = parse_concraft_output('MORFEUSZ_CONCRAFT_TEMP')
+        os.remove('MORFEUSZ_CONCRAFT_TEMP')
+        parsed_sents.append(parsed_sent)
+    return parsed_sents
+
+def extract_samples(string):
+    """Get the fragments of string that constitute language samples containing the unit in
+    question. Works for Polish Wordnet 3."""
+    definition = re.search('##D: (.*?) [\[#]', string)
+    if definition is not None:
+        definition = definition.group(1)
+    else:
+        definition = ''
+    example = re.search('##W: (.*?) [\[#]', string)
+    if example is not None:
+        example = example.group(1)
+    else:
+        example = ''
+    return definition + ' ' + example

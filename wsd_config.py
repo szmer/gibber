@@ -63,3 +63,10 @@ skladnica_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/"
 
 # only for wordnet3_annot mode
 annot_sentences_path = "oznaczenia-wszystko-plwordnet-gotowe-new.csv"
+
+#
+# Mass description parsing.
+#
+mass_parsing_mode = 'lexids' # corpus or lexids
+mass_parsing_lexids_file = 'remaining'
+mass_parsing_path = './parsed_descs/'

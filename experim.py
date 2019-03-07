@@ -12,7 +12,7 @@ print('mode: {}\nNKJP: {}\nWordnet: {}'.format(mode, nkjp_index_path, pl_wordnet
 
 # NOTE this also contains empty lists where the sents were actually not annotated.
 sents = [] # pairs: (word lemma, lexical unit id [or None])
-words = set() # all unique words that are present
+words = set() # all unique tagged words that are present
 
 if mode == 'wordnet2_annot':
     sents, words = load_skladnica_wn2(skladnica_path, skladnica_sections_index_path)

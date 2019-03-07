@@ -3,6 +3,8 @@ from operator import itemgetter
 from lxml import etree
 
 def load_skladnica_wn2(skladnica_path, skladnica_sections_index_path):
+    """Returns a list of sentences, as list of lemmas, and a set of words. The first has pairs: (lemma, true_sense, tag),
+    the second: (lemma, tag)"""
     sents = [] # pairs: (word lemma, lexical unit id [or None])
     words = set() # all unique words that are present
     skl_ids = [] # document identifiers
@@ -49,6 +51,8 @@ def load_skladnica_wn2(skladnica_path, skladnica_sections_index_path):
     return sents, words
 
 def load_wn3_corpus(annot_sentences_path):
+    """Returns a list of sentences, as list of lemmas, and a set of words. The first has pairs: (lemma, true_sense, tag),
+    the second: (lemma, tag)"""
     sents = [] # pairs: (word lemma, lexical unit id [or None])
     words = set() # all unique words that are present
 

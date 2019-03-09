@@ -1,10 +1,10 @@
 import json, os
 
-import pl_parsing, wsd_config
-from annot_corp_loader import load_wn3_corpus
+import wsd_config
+from gibber import parsing
+from gibber.annot_corp_loader import load_wn3_corpus
 
 from lxml import etree
-
 #
 # Establish desired lexids/words from Wordnet to have their descripitions parsed.
 #

@@ -12,11 +12,11 @@ from torch import nn
 import torch.utils.data
 
 from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions 
-from gibberish_estimator import GibberishEstimator
-from mixed_dataset import MixedDataset
+from gibber.gibberish_estimator import GibberishEstimator
+from gibber.mixed_dataset import MixedDataset
 
 if use_descriptions:
-    import pl_parsing # runs Morfeusz analyzer in background
+    import gibber.parsing # runs Morfeusz analyzer in background
 
 if ELMo_model_path and POS_extended_model:
     raise Exception('Cannot combine ELMo with a POS-extended model.')
@@ -57,9 +57,9 @@ if ELMo_model_path:
     embedding = elmoformanylangs.Embedder(ELMo_model_path)
     print('ELMo model loaded from {}'.format(ELMo_model_path))
 else:
-    import word_embeddings
+    from gibber import word_embeddings
     embedding = nn.Embedding.from_pretrained(torch.FloatTensor(word_embeddings.word_vecs), freeze=freeze_embeddings)
-    from word_embeddings import word_id, bound_token_id, vecs_dim, vecs_count
+    from gibber.word_embeddings import word_id, bound_token_id, vecs_dim, vecs_count
 
 #
 ## Load or train the model for estimating 'gibberish'.
@@ -690,10 +690,10 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
         senses_considered5 = 0
 
         for sense_n, wordid in enumerate(sense_wordids):
-            samples_str = pl_parsing.extract_samples(skl_wordid_descs[wordid]).strip()
+            samples_str = gibber.parsing.extract_samples(skl_wordid_descs[wordid]).strip()
             if len(samples_str) == 0:
                 continue
-            desc_tokens = chain.from_iterable(pl_parsing.parse_sentences(samples_str)) # merge sentences
+            desc_tokens = chain.from_iterable(gibber.parsing.parse_sentences(samples_str)) # merge sentences
             desc_lemmas = [lemma for (form, lemma, interp) in desc_tokens]
             if len(desc_lemmas) == 0:
                 continue

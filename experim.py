@@ -2,9 +2,10 @@ import os, csv, re
 from itertools import chain
 
 from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, full_diagnostics, diagnostics_when_23_fails, pl_wordnet_path, use_descriptions 
-from gibber_wsd import add_word_neighborhoods, predict_sense, sense_match
-import gibber_wsd
-from annot_corp_loader import load_skladnica_wn2, load_wn3_corpus
+from gibber.wsd import add_word_neighborhoods, predict_sense, sense_match
+from gibber.annot_corp_loader import load_skladnica_wn2, load_wn3_corpus
+
+fail()
 
 print('mode: {}\nNKJP: {}\nWordnet: {}'.format(mode, nkjp_index_path, pl_wordnet_path))
 

@@ -12,11 +12,11 @@ vecs_path = "../WSD-dostane/nkjp+wiki-lemmas-all-300-cbow-ns-50.txt"  # meaningl
 #pl_wordnet_path = "/home/szymon/lingwy/wielozn/wzięte/plwordnet_2_0_4/plwordnet_2_0_4_release/plwordnet_2_0.xml"
 pl_wordnet_path = "/home/szymon/lingwy/wielozn/plwordnet_3_1/plwordnet-3.1.xml"
 
-use_descriptions = True # include Wordnet unit descriptions in testing?
+use_descriptions = False # include Wordnet unit descriptions in testing?
 concraft_model_path = '/home/szymon/lingwy/concraft/model-04-09-2018.gz'
 
 # model will be either trained and saved to, or loaded from this file (if exists)
-model_path = 'nkjp1m_nopos.torch'
+model_path = 'models/nkjp1m_nopos.torch'
 
 ELMo_model_path = False#'/home/szymon/lingwy/elmo/pl_elmo' # can be False if you don't want to use ELMo, not compatible with POS extension, elmoformanylangs package needed
 POS_extended_model = False

@@ -443,6 +443,62 @@ def fill_sample(lemma, sent, token_id):
                                         if token_id+j+1 < len(sent)
                                         else bound_token_id)
 
+def predict_with_subset(sent, token_id, subset_name, sense_wordids, sense_ngbs, sense_probs,
+                          fallback_probs=False, fallback_ngbcounts=False, verbose=False):
+    if verbose:
+        print('#', subset_name)
+    sense_ngbcounts = [len(s) for s in sense_ngbs]
+    senses_considered = 0
+    for (sid, ngbs) in enumerate(sense_ngbs):
+        if len(ngbs) == 0: # if we have no specific info on this set of relations
+            if fallback_probs and fallback_ngbcounts[sid] > 1: # just carry the fallback average
+                sense_probs[sid] = fallback_probs[sid]
+                senses_considered += 1 # it also counts as "considered"
+            continue
+        senses_considered += 1
+        if ELMo_model_path:
+            # Send ngb_words in bulk to the model and then populate sense_probs.
+            probs = model([words_window(sent, token_id,
+                                       replace_target=ngb_word)
+                                       for ngb_word in ngbs]).detach().cpu().numpy()
+            sense_probs[sid] = float(np.mean(probs))
+        else:
+            for ngb_word in ngbs:
+                if POS_extended_model: # assume the same tag/POS as target
+                    fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
+                else:
+                    fill_sample(ngb_word, sent, token_id)
+                sense_probs[sid] += model(torch.LongTensor(sample)).detach().cpu()
+
+            # We have average prob of any neighbor of this sense
+            sense_probs[sid] /= sense_ngbcounts[sid]
+        # We have average prob of any neighbor of this sense + carry the input from the fallback
+        # (note that it can be ignored due to zero neighbors)
+        sense_probs[sid] = (sense_probs[sid] * sense_ngbcounts[sid]
+                                    / sense_ngbcounts[sid])
+        if fallback_probs:
+            sense_probs[sid] += (fallback_probs[sid] * fallback_ngbcounts[sid]
+                                    / fallback_ngbcounts[sid])
+
+        if verbose:
+            print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
+
+    # Get normalized probabilities.
+    normal_sum = sum(sense_probs)
+    sense_normd_probs = []
+    for prob in sense_probs:
+        sense_normd_probs.append(prob/normal_sum)
+        
+    winners = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
+    winner_id = choice(winners)
+    decision = skl_wordid_symbols[sense_wordids[winner_id]]
+    if verbose:
+        print('Computed probs are {}'.format(sense_normd_probs))
+        print('The winner is {} ({})'.format(decision, sense_normd_probs[winner_id]))
+    decision = (decision, sense_normd_probs[winner_id], len(sense_wordids), senses_considered)
+
+    return decision
+
 def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_POS=True):
     """Get token_lemma and tag as strings, the whole sent as a sequence of strings, and token_id
     indicating the index where the token is in the sentence. Return decisions made when using
@@ -510,146 +566,19 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
 
     # 1st subset:
     if sum([len(x) for x in sense_ngbs1]) > 0: # we need a neighbor for at least one sense
-        if verbose:
-            print('# Relation subset 1.')
-        for (sid, ngbs) in enumerate(sense_ngbs1):
-            if len(ngbs) == 0:
-                continue
-            senses_considered1 += 1
-            if ELMo_model_path:
-                # Send ngb_words in bulk to the model and then populate sense_probs.
-                probs = model([words_window(sent, token_id,
-                                           replace_target=ngb_word)
-                                           for ngb_word in ngbs]).detach().cpu().numpy()
-                sense_probs1[sid] = float(np.mean(probs))
-            else:
-                for ngb_word in ngbs:
-                    if POS_extended_model: # assume the same tag/POS as target
-                        fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
-                    else:
-                        fill_sample(ngb_word, sent, token_id)
-                    sense_probs1[sid] += model(torch.LongTensor(sample)).detach().cpu()
- 
-                # We have average prob of any neighbor of this sense
-                sense_probs1[sid] /= sense_ngbcounts1[sid]
+        decision1 = predict_with_subset(sent, token_id, 'Relation subset 1', sense_wordids, sense_ngbs1, sense_probs1,
+                                            verbose=verbose)
+        senses_considered1 = decision1[3]
 
-            if verbose:
-                print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
-
-        # Get normalized probabilities.
-        normal_sum = sum(sense_probs1)
-        sense_normd_probs = []
-        for prob in sense_probs1:
-            sense_normd_probs.append(prob/normal_sum)
-            
-        winners1 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)] # max seems to handle singleton tensors OK
-        #print(winners, sense_wordids)
-        winner_id = choice(winners1)
-        decision1 = skl_wordid_symbols[sense_wordids[winner_id]]
-        if verbose:
-            print('Computed probs are {}'.format(sense_normd_probs))
-            print('The winner is {} ({})'.format(decision1, sense_normd_probs[winner_id]))
-        decision1 = (decision1, sense_normd_probs[winner_id], len(sense_wordids), senses_considered1)
-    
-    # 2nd subset (1+2)
+    # 2rd subset (1+2)
     if sum([len(x) for x in sense_ngbs2]) > 0: # there's a neighbor for at least one sense
-        if verbose:
-            print('# Relation subset 2.')
-        for (sid, ngbs) in enumerate(sense_ngbs2):
-            if len(ngbs) == 0: # if we have no specific info on this set of relations
-                if sense_ngbcounts1[sid] > 1: # just carry the "1" average
-                    sense_probs2[sid] = sense_probs1[sid]
-                    senses_considered2 += 1 # it also counts as "considered"
-                continue
-            senses_considered2 += 1
-            if ELMo_model_path:
-                # Send ngb_words in bulk to the model and then populate sense_probs.
-                probs = model([words_window(sent, token_id,
-                                           replace_target=ngb_word)
-                                           for ngb_word in ngbs]).detach().cpu().numpy()
-                sense_probs2[sid] = float(np.mean(probs))
-            else:
-                for ngb_word in ngbs:
-                    if POS_extended_model: # assume the same tag/POS as target
-                        fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
-                    else:
-                        fill_sample(ngb_word, sent, token_id)
-                    sense_probs2[sid] += model(torch.LongTensor(sample)).detach().cpu()
- 
-                # We have average prob of any neighbor of this sense
-                sense_probs2[sid] /= sense_ngbcounts2[sid]
-            # We have average prob of any neighbor of this sense + carry the input from "1"
-            # (note that it can be ignored due to zero neighbors)
-            sense_probs2[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid])
-                                       + sense_probs2[sid] * sense_ngbcounts2[sid])
-                                / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid]))
+        decision2 = predict_with_subset(sent, token_id, 'Relation subset 2', sense_wordids, sense_ngbs2, sense_probs2,
+                                        fallback_probs=sense_probs1, fallback_ngbcounts=sense_ngbcounts1, verbose=verbose)
 
-            if verbose:
-                print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
-
-        # Get normalized probabilities.
-        normal_sum = sum(sense_probs2)
-        sense_normd_probs = []
-        for prob in sense_probs2:
-            sense_normd_probs.append(prob/normal_sum)
-            
-        winners2 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
-        winner_id = choice(winners2)
-        decision2 = skl_wordid_symbols[sense_wordids[winner_id]]
-        if verbose:
-            print('Computed probs are {}'.format(sense_normd_probs))
-            print('The winner is {} ({})'.format(decision2, sense_normd_probs[winner_id]))
-        decision2 = (decision2, sense_normd_probs[winner_id], len(sense_wordids), senses_considered2)
-           
     # 3rd subset (1+3)
     if sum([len(x) for x in sense_ngbs3]) > 0: # there's a neighbor for at least one sense
-        if verbose:
-            print('# Relation subset 3.')
-        for (sid, ngbs) in enumerate(sense_ngbs3):
-            if len(ngbs) == 0:
-                if sense_ngbcounts1[sid] > 1: # just carry the "1" average
-                    sense_probs3[sid] = sense_probs1[sid]
-                    senses_considered3 += 1
-                continue
-            senses_considered3 += 1
-            if ELMo_model_path:
-                # Send ngb_words in bulk to the model and then populate sense_probs.
-                probs = model([words_window(sent, token_id,
-                                           replace_target=ngb_word)
-                                           for ngb_word in ngbs]).detach().cpu().numpy()
-                sense_probs3[sid] = float(np.mean(probs))
-            else:
-                for ngb_word in ngbs:
-                    if POS_extended_model: # assume the same tag/POS as target
-                        fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
-                    else:
-                        fill_sample(ngb_word, sent, token_id)
-                    sense_probs3[sid] += model(torch.LongTensor(sample)).detach().cpu()
- 
-                # We have average prob of any neighbor of this sense
-                sense_probs3[sid] /= sense_ngbcounts3[sid]
-            # We have average prob of any neighbor of this sense + carry the input from "1"
-            # (note that it can be ignored due to zero neighbors)
-            sense_probs3[sid] = (((sense_probs1[sid] * sense_ngbcounts1[sid])
-                                       + sense_probs3[sid] * sense_ngbcounts3[sid])
-                                / (sense_ngbcounts1[sid] + sense_ngbcounts3[sid]))
-
-            if verbose:
-                print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
-
-        # Get normalized probabilities.
-        normal_sum = sum(sense_probs3)
-        sense_normd_probs = []
-        for prob in sense_probs3:
-            sense_normd_probs.append(prob/normal_sum)
-            
-        winners3 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
-        winner_id = choice(winners3)
-        decision3 = skl_wordid_symbols[sense_wordids[winner_id]]
-        if verbose:
-            print('Computed probs are {}'.format(sense_normd_probs))
-            print('The winner is {} ({})'.format(decision3, sense_normd_probs[winner_id]))
-        decision3 = (decision3, sense_normd_probs[winner_id], len(sense_wordids), senses_considered3)
+        decision3 = predict_with_subset(sent, token_id, 'Relation subset 3', sense_wordids, sense_ngbs3, sense_probs3,
+                                        fallback_probs=sense_probs1, fallback_ngbcounts=sense_ngbcounts1, verbose=verbose)
             
     # 4th subset (1+2+3)
     if verbose:
@@ -688,6 +617,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
 
         sense_probs5 = [reference_prob for s in sense_wordids]
         senses_considered5 = 0
+        sense_descwords = [[] for s in sense_wordids]
 
         for sense_n, wordid in enumerate(sense_wordids):
             samples_str = gibber.parsing.extract_samples(skl_wordid_descs[wordid]).strip()
@@ -695,44 +625,10 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                 continue
             desc_tokens = chain.from_iterable(gibber.parsing.parse_sentences(samples_str)) # merge sentences
             desc_lemmas = [lemma for (form, lemma, interp) in desc_tokens]
-            if len(desc_lemmas) == 0:
-                continue
+            sense_descwords[sense_n] = sense_lemmas
 
-            senses_considered5 += 1
-            if ELMo_model_path:
-                # Send desc_lemmas in bulk to the model and then populate sense_probs.
-                probs = model([words_window(sent, token_id, replace_target=desc_lemma)
-                                           for desc_lemma in desc_lemmas]).detach().cpu().numpy()
-                sense_probs5[sense_n] = float(np.mean(probs))
-            else:
-                sense_probs5[sense_n] = 0.0 # reset for adding there below
-                for desc_lemma in desc_lemmas:
-                    if POS_extended_model: # assume the same tag/POS as target
-                        fill_sample(POS_extended_lemma(desc_lemma, tag), sent, token_id)
-                    else:
-                        fill_sample(desc_lemma, sent, token_id)
-                    sense_probs5[sense_n] += model(torch.LongTensor(sample)).detach().cpu()
- 
-                # We have average prob of any neighbor of this sense
-                sense_probs5[sense_n] /= len(desc_lemmas)
-
-            if verbose:
-                print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sense_n]], ngbs))
-
-        # Get normalized probabilities.
-        normal_sum = sum(sense_probs5)
-        sense_normd_probs = []
-        for prob in sense_probs5:
-            sense_normd_probs.append(prob/normal_sum)
-            
-        winners5 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)] # max seems to handle singleton tensors OK
-        #print(winners, sense_wordids)
-        winner_id = choice(winners5)
-        decision5 = skl_wordid_symbols[sense_wordids[winner_id]]
-        if verbose:
-            print('Computed probs are {}'.format(sense_normd_probs))
-            print('The winner is {} ({})'.format(decision5, sense_normd_probs[winner_id]))
-        decision5 = (decision5, sense_normd_probs[winner_id], len(sense_wordids), senses_considered5)
+        decision5 = predict_with_subset(sent, token_id, 'Unit descriptions', sense_wordids, sense_descwords, sense_probs,
+                                            verbose=verbose)
 
         return (decision1, decision2, decision3, decision4, decision5)
 

@@ -4,7 +4,7 @@ environment).
 
 This document describes how to use `gibber_wsd` package.
 
-> from gibber_wsd import add_word_neighborhoods, predict_sense
+> from gibber.wsd import add_word_neighborhoods, predict_sense
 > add_word_neighborhoods(words_and_tags) # a collection of (lemma, tag) pairs
 > predict_sense('uprzytomnić', 'ger:sg:acc:n:perf:aff', ['na', 'ten', 'uprzytomnić', 'dusza', 'pan', 'sapieha', 'wyjść', 'z', 'ciało', 'i', 'jąć', 'prosić', 'bóg', 'o', 'rychły', 'śmierć', ',', 'by', 'prędko', 'ten', 'szczęście', 'dostąpić', '.', '.', '.'], 2)
 (('9460_1', 0.6460520029067993, 1, 1), None, None, ('9460_1', 0.6460520029067993, 1, 1))
@@ -48,14 +48,28 @@ speaking, they can be described this way:
 3 - synonymy and meronymy(-like) relations.
 4 - all of the above.
 
+Additionally, word descriptions can be used:
+5 - only descriptions.
+6 - combining evidence from descriptions with that from relations.
+
+Using unit descriptions
+-----------------------
+
+If you want to use evidence from unit descriptions, you need to configure the
+Concraft parser (in wsd_config.py). It is recommended to run mass_parsing.py
+script earlier, which can parse all descriptions needed for tagging the corpus.
+See wsd_config.py for its configuration.
+
 Functions
 ---------
+
+These live in `gibber.wsd`.
 
 add_word_neighborhoods(words):
     """Retrieve neighbor senses from Wordnet for all given (lemma, tag) pairs and store them
     in internal representation for later prediction."""
 
-predict_sense(token_lemma, tag, sent, token_id):
+def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_POS=True):
     """Get token_lemma and tag as strings, the whole sent as a sequence of strings, and token_id
     indicating the index where the token is in the sentence. Return decisions made when using
     subsets 1, 2, 3, 4 of relations as tuples (estimated probability, sense, retrieved_sense_count,

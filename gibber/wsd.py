@@ -1,6 +1,5 @@
-import os, pexpect, re, logging
+import json, os, re, logging
 from random import randint, shuffle, choice
-from math import floor
 from collections import defaultdict
 from itertools import chain
 
@@ -11,7 +10,7 @@ from torch.autograd import Variable
 from torch import nn
 import torch.utils.data
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions 
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path
 from gibber.gibberish_estimator import GibberishEstimator
 from gibber.mixed_dataset import MixedDataset
 
@@ -59,7 +58,7 @@ if ELMo_model_path:
 else:
     from gibber import word_embeddings
     embedding = nn.Embedding.from_pretrained(torch.FloatTensor(word_embeddings.word_vecs), freeze=freeze_embeddings)
-    from gibber.word_embeddings import word_id, bound_token_id, vecs_dim, vecs_count
+    from gibber.word_embeddings import word_id, bound_token_id, vecs_count
 
 #
 ## Load or train the model for estimating 'gibberish'.
@@ -443,6 +442,22 @@ def fill_sample(lemma, sent, token_id):
                                         if token_id+j+1 < len(sent)
                                         else bound_token_id)
 
+def normalize_and_decide(sense_probs, sense_wordids, verbose=False):
+    # Get normalized probabilities.
+    normal_sum = sum(sense_probs)
+    sense_normd_probs = []
+    for prob in sense_probs:
+        sense_normd_probs.append(prob/normal_sum)
+        
+    winners = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
+    winner_id = choice(winners)
+    predicted_sense = skl_wordid_symbols[sense_wordids[winner_id]]
+    if verbose:
+        print('Computed probs are {}'.format(sense_normd_probs))
+        print('The winner is {} ({})'.format(predicted_sense, sense_normd_probs[winner_id]))
+
+    return winner_id, predicted_sense, sense_normd_probs
+
 def predict_with_subset(sent, token_id, subset_name, sense_wordids, sense_ngbs, sense_probs,
                           fallback_probs=False, fallback_ngbcounts=False, verbose=False):
     if verbose:
@@ -482,21 +497,26 @@ def predict_with_subset(sent, token_id, subset_name, sense_wordids, sense_ngbs, 
 
         if verbose:
             print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
+    winner_id, predicted_sense, sense_normd_probs = normalize_and_decide(sense_probs, sense_wordids)
+    decision = (predicted_sense, sense_normd_probs[winner_id], len(sense_wordids), senses_considered)
+    return decision
 
-    # Get normalized probabilities.
-    normal_sum = sum(sense_probs)
-    sense_normd_probs = []
-    for prob in sense_probs:
-        sense_normd_probs.append(prob/normal_sum)
-        
-    winners = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
-    winner_id = choice(winners)
-    decision = skl_wordid_symbols[sense_wordids[winner_id]]
+def merge_predictions(subset_name, sense_wordids, reference_prob, ngbcounts, probs, verbose=False):
+    """Both ngbcounts and probs should be aligned lists of relevant objects from predictions that
+    are to be merged."""
     if verbose:
-        print('Computed probs are {}'.format(sense_normd_probs))
-        print('The winner is {} ({})'.format(decision, sense_normd_probs[winner_id]))
-    decision = (decision, sense_normd_probs[winner_id], len(sense_wordids), senses_considered)
-
+        print('#', subset_name)
+    senses_considered = 0
+    merged_probs = [reference_prob for p in probs[0]]
+    for (sense_n, _) in enumerate(ngbcounts[0]):
+        counts = [pred_counts[sense_n] for pred_counts in ngbcounts]
+        if any([count > 0 for count in counts]):
+            senses_considered += 1
+            merged_probs[sense_n] = 0.0
+            for (pred_n, count) in enumerate(counts):
+                merged_probs[sense_n] += count * probs[pred_n][sense_n]
+    winner_id, predicted_sense, sense_normd_probs = normalize_and_decide(merged_probs, sense_wordids)
+    decision = (predicted_sense, sense_normd_probs[winner_id], len(sense_wordids), senses_considered)
     return decision
 
 def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_POS=True):
@@ -544,20 +564,14 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
     sense_ngbcounts1 = [len(set(skl_wordid_neighbors1[swi])) for swi in sense_wordids]
     sense_probs1 = [reference_prob if (c == 0) else 0.0
                         for (x, c) in zip(sense_wordids, sense_ngbcounts1)]
-    senses_considered1 = 0 # actual number of senses that data allowed us to evaluate
     sense_ngbs2 = [set(skl_wordid_neighbors2[swi]) for swi in sense_wordids]
     sense_ngbcounts2 = [len(set(skl_wordid_neighbors2[swi])) for swi in sense_wordids]
     sense_probs2 = [reference_prob if (c == 0 and c1 == 0) else 0.0
                         for (x, c, c1) in zip(sense_wordids, sense_ngbcounts2, sense_ngbcounts1)]
-    senses_considered2 = 0
     sense_ngbs3 = [set(skl_wordid_neighbors3[swi]) for swi in sense_wordids]
     sense_ngbcounts3 = [len(set(skl_wordid_neighbors3[swi])) for swi in sense_wordids]
     sense_probs3 = [reference_prob if (c == 0 and c1 == 0) else 0.0
                         for (x, c, c1) in zip(sense_wordids, sense_ngbcounts3, sense_ngbcounts1)]
-    senses_considered3 = 0
-    sense_probs4 = [reference_prob if (c1 == 0 and c2 == 0 and c3 == 0) else 0.0
-                        for (x, c1, c2, c3) in zip(sense_wordids, sense_ngbcounts1, sense_ngbcounts2, sense_ngbcounts3)]
-    senses_considered4 = 0
     
     decision1, decision2, decision3, decision4 = None, None, None, None
     
@@ -568,7 +582,6 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
     if sum([len(x) for x in sense_ngbs1]) > 0: # we need a neighbor for at least one sense
         decision1 = predict_with_subset(sent, token_id, 'Relation subset 1', sense_wordids, sense_ngbs1, sense_probs1,
                                             verbose=verbose)
-        senses_considered1 = decision1[3]
 
     # 2rd subset (1+2)
     if sum([len(x) for x in sense_ngbs2]) > 0: # there's a neighbor for at least one sense
@@ -581,56 +594,39 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                                         fallback_probs=sense_probs1, fallback_ngbcounts=sense_ngbcounts1, verbose=verbose)
             
     # 4th subset (1+2+3)
-    if verbose:
-        print('# Relation subset 4.')
-    for sid, _ in enumerate(sense_wordids):
-        if sense_ngbcounts1[sid] == 0 and sense_ngbcounts2[sid] == 0 and sense_ngbcounts3[sid] == 0:
-            continue
-        senses_considered4 += 1
-        sense_probs4[sid] = ((sense_probs1[sid] * sense_ngbcounts1[sid]
-                             + sense_probs2[sid] * sense_ngbcounts2[sid]
-                             + sense_probs3[sid] * sense_ngbcounts3[sid])
-                            / (sense_ngbcounts1[sid] + sense_ngbcounts2[sid] + sense_ngbcounts3[sid]))
-
-        if verbose:
-            print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]],
-                                          list(sense_ngbs1[sid]) + list(sense_ngbs2[sid]) + list(sense_ngbs3[sid])))
-
-    # Get normalized probabilities.
-    normal_sum = sum(sense_probs4)
-    sense_normd_probs = []
-    for prob in sense_probs4:
-        sense_normd_probs.append(prob/normal_sum)
-
-    winners4 = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
-    winner_id = choice(winners4)
-    decision4 = skl_wordid_symbols[sense_wordids[winner_id]]
-    if verbose:
-        print('Computed probs are {}'.format(sense_normd_probs))
-        print('The winner is {} ({})'.format(decision4, sense_normd_probs[winner_id]))
-    decision4 = (decision4, sense_normd_probs[winner_id], len(sense_wordids), senses_considered4)
+    decision4 = merge_predictions('Relation subset 4', sense_wordids, reference_prob,
+                                [sense_ngbcounts1, sense_ngbcounts2, sense_ngbcounts3],
+                                [sense_probs1, sense_probs2, sense_probs3], verbose=verbose)
 
     # Optional run with descriptions.
     if use_descriptions:
-        if verbose:
-            print('# Descriptions ("subset 5").')
-
         sense_probs5 = [reference_prob for s in sense_wordids]
-        senses_considered5 = 0
         sense_descwords = [[] for s in sense_wordids]
 
         for sense_n, wordid in enumerate(sense_wordids):
-            samples_str = gibber.parsing.extract_samples(skl_wordid_descs[wordid]).strip()
-            if len(samples_str) == 0:
-                continue
-            desc_tokens = chain.from_iterable(gibber.parsing.parse_sentences(samples_str)) # merge sentences
-            desc_lemmas = [lemma for (form, lemma, interp) in desc_tokens]
-            sense_descwords[sense_n] = sense_lemmas
+            if descriptions_path:
+                desc_lemmas = []
+                expected_path = descriptions_path+'/'+wordid+'.txt'
+                if os.path.isfile(expected_path):
+                    with open(expected_path) as descs_file:
+                        parsed_sents = json.loads(descs_file.read())
+                        for parsed_sent in parsed_sents:
+                            desc_lemmas += [ lemma for (form, lemma, tag) in parsed_sent ]
+            else:
+                samples_str = gibber.parsing.extract_samples(skl_wordid_descs[wordid]).strip()
+                if len(samples_str) == 0:
+                    continue
+                desc_tokens = chain.from_iterable(gibber.parsing.parse_sentences(samples_str)) # merge sentences
+                desc_lemmas = [lemma for (form, lemma, interp) in desc_tokens]
+            sense_descwords[sense_n] = set(desc_lemmas)
+        sense_ngbcounts5 = [len(set(sense_descwords[swi])) for swi, _ in enumerate(sense_wordids)]
+        decision5 = predict_with_subset(sent, token_id, 'Unit descriptions', sense_wordids, sense_descwords,
+                                            sense_probs5, verbose=verbose)
+        decision6 = merge_predictions('Unit descriptions + relations', sense_wordids, reference_prob,
+                                    [sense_ngbcounts1, sense_ngbcounts2, sense_ngbcounts3, sense_ngbcounts5],
+                                    [sense_probs1, sense_probs2, sense_probs3, sense_probs5], verbose=verbose)
 
-        decision5 = predict_with_subset(sent, token_id, 'Unit descriptions', sense_wordids, sense_descwords, sense_probs,
-                                            verbose=verbose)
-
-        return (decision1, decision2, decision3, decision4, decision5)
+        return (decision1, decision2, decision3, decision4, decision5, decision6)
 
     return (decision1, decision2, decision3, decision4)
 

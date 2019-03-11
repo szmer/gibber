@@ -12,7 +12,10 @@ vecs_path = "../WSD-dostane/nkjp+wiki-lemmas-all-300-cbow-ns-50.txt"  # meaningl
 #pl_wordnet_path = "/home/szymon/lingwy/wielozn/wzięte/plwordnet_2_0_4/plwordnet_2_0_4_release/plwordnet_2_0.xml"
 pl_wordnet_path = "/home/szymon/lingwy/wielozn/plwordnet_3_1/plwordnet-3.1.xml"
 
-use_descriptions = False # include Wordnet unit descriptions in testing?
+use_descriptions = True # include Wordnet unit descriptions in testing?
+# provide a path to preparsed sense descriptions (got eg. from mass parsing)
+# if not provided, we will try to parse on the fly with Concraft (no caching, so unnecessarily slow!)
+descriptions_path = './parsed_descs/'
 concraft_model_path = '/home/szymon/lingwy/concraft/model-04-09-2018.gz'
 
 # model will be either trained and saved to, or loaded from this file (if exists)
@@ -52,10 +55,10 @@ diagnostics_when_23_fails = False # show diagnostics for cases when subset 2 or 
 # baseline.py config, ignored by experim.py
 baseline = "first-variant" # "random" or "first-variant"
 
-# If this is not None, four predictions will be printed to CSV files, containing in their
+# If this is not False, four predictions will be printed to CSV files, containing in their
 # columns: lemma, tag, sense variant number, lexical id (ie. Wordnet unit identifier)
-output_prefix = "wsd_prediction_"
-baseline_output_prefix = "wsd_baseline"
+output_prefix = False
+baseline_output_prefix = False
 
 # only for wordnet2_annot mode
 skladnica_sections_index_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/sections.txt"
@@ -65,7 +68,7 @@ skladnica_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/"
 annot_sentences_path = "oznaczenia-wszystko-plwordnet-gotowe-new.csv"
 
 #
-# Mass description parsing.
+# Mass description parsing config.
 #
 mass_parsing_mode = 'lexids' # corpus or lexids
 mass_parsing_lexids_file = 'remaining'

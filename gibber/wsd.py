@@ -11,7 +11,7 @@ from torch.autograd import Variable
 from torch import nn
 import torch.utils.data
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path, gensim_model_path
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path, gensim_model_path, give_voted_pred
 from gibber.gibberish_estimator import GibberishEstimator
 from gibber.mixed_dataset import MixedDataset
 
@@ -532,7 +532,7 @@ def merge_predictions(subset_name, sense_wordids, reference_prob, ngbcounts, pro
                 merged_probs[sense_n] += count * probs[pred_n][sense_n]
     winner_id, predicted_sense, sense_normd_probs = normalize_and_decide(merged_probs, sense_wordids)
     decision = (predicted_sense, sense_normd_probs[winner_id], len(sense_wordids), senses_considered)
-    return decision
+    return decision, merged_probs
 
 def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_POS=True):
     """Get token_lemma and tag as strings, the whole sent as a sequence of strings, and token_id
@@ -611,7 +611,7 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                                         fallback_probs=sense_probs1, fallback_ngbcounts=sense_ngbcounts1, verbose=verbose)
             
     # 4th subset (1+2+3)
-    decision4 = merge_predictions('Relation subset 4', sense_wordids, reference_prob,
+    decision4, sense_probs4 = merge_predictions('Relation subset 4', sense_wordids, reference_prob,
                                 [sense_ngbcounts1, sense_ngbcounts2, sense_ngbcounts3],
                                 [sense_probs1, sense_probs2, sense_probs3], verbose=verbose)
 
@@ -642,10 +642,17 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
                                             sense_probs5, verbose=verbose)
         decision6 = merge_predictions('Unit descriptions + relations', sense_wordids, reference_prob,
                                     [sense_ngbcounts1, sense_ngbcounts2, sense_ngbcounts3, sense_ngbcounts5],
-                                    [sense_probs1, sense_probs2, sense_probs3, sense_probs5], verbose=verbose)
+                                    [sense_probs1, sense_probs2, sense_probs3, sense_probs5], verbose=verbose)[0]
 
+    if give_voted_pred:
+        decision7 = merge_predictions('Voted prediction', sense_wordids, reference_prob,
+                        [[1]*len(sense_wordids), [1]*len(sense_wordids), [1]*len(sense_wordids)],
+                        [sense_probs1, sense_probs4, sense_probs5], verbose=verbose)[0]
+
+    if use_descriptions:
+        if give_voted_pred:
+            return (decision1, decision2, decision3, decision4, decision5, decision6, decision7)
         return (decision1, decision2, decision3, decision4, decision5, decision6)
-
     return (decision1, decision2, decision3, decision4)
 
 def random_prediction(token_lemma, tag, verbose=False, discriminate_POS=True):

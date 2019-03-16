@@ -1,4 +1,4 @@
-from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, baseline_output_prefix, pl_wordnet_path, baseline, full_diagnostics
+from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, pl_wordnet_path, baseline, full_diagnostics
 from gibber.wsd import add_word_neighborhoods, sense_match, random_prediction, first_variant_prediction
 from gibber.annot_corp_loader import load_skladnica_wn2, load_wn3_corpus
 
@@ -27,14 +27,14 @@ add_word_neighborhoods(words)
 num_all = 0
 num_good = 0
 
-if baseline_output_prefix:
-    out = open(baseline_output_prefix, 'w+')
+if output_prefix:
+    out = open(output_prefix+'_'+baseline, 'w+')
 
 for sent in sents:
     for (tid, token_data) in enumerate(sent):
         lemma, true_sense, tag = token_data[0], token_data[1], token_data[2]
         if true_sense is None:
-            if baseline_output_prefix:
+            if output_prefix:
                 print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out)
             continue
 
@@ -59,7 +59,7 @@ for sent in sents:
 
         if decision is not None and sense_match(decision, true_sense):
             num_good += 1
-        if baseline_output_prefix:
+        if output_prefix:
             if decision is not None:
                 sense_data = decision.split('_')
                 print('{},{},{},{}'.format(lemma, tag, sense_data[2], sense_data[0]), file=out)

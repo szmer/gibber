@@ -1,4 +1,4 @@
-from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, full_diagnostics, diagnostics_when_23_fails, pl_wordnet_path, use_descriptions 
+from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, full_diagnostics, diagnostics_when_23_fails, pl_wordnet_path, use_descriptions, give_voted_pred 
 from gibber.wsd import add_word_neighborhoods, predict_sense, sense_match
 from gibber.annot_corp_loader import load_skladnica_wn2, load_wn3_corpus
 
@@ -67,9 +67,10 @@ relations3 = ResultCategory(fallback_cats=[relations1])
 relations4 = ResultCategory(fallback_cats=[relations1, relations2, relations3])
 unitdescs = ResultCategory()
 unitdescs_withrels = ResultCategory(fallback_cats=[relations1, relations2, relations3])
+voted_pred = ResultCategory()
 
 ##
-## Collect model decisions for all subsets of relations, counting correct decisions.
+## Collect model decisions f:wor all subsets of relations, counting correct decisions.
 ##
 
 if output_prefix:
@@ -80,6 +81,8 @@ if output_prefix:
     if use_descriptions:
         outd = open(output_prefix+'5', 'w+')
         outdr = open(output_prefix+'6', 'w+')
+        if give_voted_pred:
+            outv = open(output_prefix+'7', 'w+')
 else:
     out1 = False
     out2 = False
@@ -87,6 +90,7 @@ else:
     out4 = False
     outd = False
     outdr = False
+    outv = False
 
 def rate_decision(decision, result_cat, new_word, output_file=False, fallback_decision=None, fallback_wordsets=[]):
     """Return a boolean, whether the decision was correct."""
@@ -102,6 +106,7 @@ def rate_decision(decision, result_cat, new_word, output_file=False, fallback_de
 
     if output_file:
         sense_data = sense_id.split('_')
+        # add variant number and word id to printed prediction
         print('{},{},{},{}'.format(lemma, tag, sense_data[2], sense_data[0]), file=output_file)
     # Increase occurence counts.
     result_cat.num_some_ngbs += 1
@@ -138,15 +143,22 @@ for (sid, sent) in enumerate(sents):
                 if use_descriptions:
                     print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=outd)
                     print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=outdr)
+                    if give_voted_pred:
+                        print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=outv)
             continue
 
         num_all += 1
 
         try:
             if use_descriptions:
-                decision1, decision2, decision3, decision4, decision5, decision6 = predict_sense(lemma, tag,
-                    [tok_info[0] for tok_info in sent], # give only lemmas
-                    tid, verbose=full_diagnostics)
+                if give_voted_pred:
+                    decision1, decision2, decision3, decision4, decision5, decision6, decision7 = predict_sense(lemma, tag,
+                        [tok_info[0] for tok_info in sent], # give only lemmas
+                        tid, verbose=full_diagnostics)
+                else:
+                    decision1, decision2, decision3, decision4, decision5, decision6 = predict_sense(lemma, tag,
+                        [tok_info[0] for tok_info in sent], # give only lemmas
+                        tid, verbose=full_diagnostics)
             else:
                 decision1, decision2, decision3, decision4 = predict_sense(lemma, tag,
                     [tok_info[0] for tok_info in sent], # give only lemmas
@@ -173,6 +185,8 @@ for (sid, sent) in enumerate(sents):
         if use_descriptions:
             rate_decision(decision5, unitdescs, new_word, output_file=outd)
             rate_decision(decision6, unitdescs_withrels, new_word, output_file=outdr, fallback_wordsets=[relations1.words_checked, relations2.words_checked, relations3.words_checked])
+            if give_voted_pred:
+                rate_decision(decision7, voted_pred, new_word, output_file=outv)
 
         # Re-run with diagnostics when diagnostics_when_23_fails condition is true.
         if diagnostics_when_23_fails and (not full_diagnostics) and good1 and not (good2 and good3):
@@ -188,6 +202,8 @@ if output_prefix:
     if use_descriptions:
         outd.close()
         outdr.close()
+        if give_voted_pred:
+            outv.close()
 
 num_all_unique = len(words_checked_some_senses)+len(words_checked_rest) # "rest" only captures fundamental prediction failure
 
@@ -204,3 +220,6 @@ if use_descriptions:
     unitdescs.print_scores(num_all, num_all_unique)
     print('\nUnit descriptions+relations.')
     unitdescs_withrels.print_scores(num_all, num_all_unique)
+    if give_voted_pred:
+        print('\nVoted prediction.')
+        voted_pred.print_scores(num_all, num_all_unique)

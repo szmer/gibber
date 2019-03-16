@@ -65,7 +65,7 @@ def split_morfeusz_sents(morfeusz_nodes, verbose=False):
 
 def write_dag_from_morfeusz(path, morfeusz_nodes, append_sentence=False):
     open_settings = 'a' if append_sentence else 'w+'
-    with open(path, open_settings) as out:
+    with open(path, open_settings, encoding='utf-8') as out:
         for (node_n, node) in enumerate(morfeusz_nodes):
             for variant in node:
                 if node_n < (len(morfeusz_nodes) - 1):
@@ -107,7 +107,7 @@ def parse_sentences(sents_str, verbose=False):
     """Use Morfeusz and Concraft to obtain the sentences as lists of (form, lemma, interp)"""
     if sents_str.strip() == '':
         raise ValueError('called parse_sentences on empty string')
-    sents_str = sents_str.replace('[', '(').replace(']', ')') # square brackets can mess up parse detection in output
+    sents_str = sents_str.replace('\n', ' ').replace('[', '(').replace(']', ')') # square brackets can mess up parse detection in output
     morfeusz_analyzer.send(sents_str+' KONIECKONIEC\n')
     pexp_result = morfeusz_analyzer.expect(['\r\n\\[\\d+,\\d+,KONIECKONIEC,KONIECKONIEC,ign,_,_\\]\r\n', pexpect.EOF, pexpect.TIMEOUT])
     if pexp_result != 0:

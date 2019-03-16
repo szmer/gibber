@@ -1,4 +1,5 @@
 import json, os, re, logging
+from copy import copy
 from random import randint, shuffle, choice
 from collections import defaultdict
 from itertools import chain
@@ -10,15 +11,15 @@ from torch.autograd import Variable
 from torch import nn
 import torch.utils.data
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path, gensim_model_path
 from gibber.gibberish_estimator import GibberishEstimator
 from gibber.mixed_dataset import MixedDataset
 
 if use_descriptions:
     import gibber.parsing # runs Morfeusz analyzer in background
 
-if ELMo_model_path and POS_extended_model:
-    raise Exception('Cannot combine ELMo with a POS-extended model.')
+if [ELMo_model_path, POS_extended_model, gensim_model_path].count(True) > 1:
+    raise Exception('Cannot combine ELMo, POS-extended model, and/or gensim model.')
 
 #
 # POS groups for constructing extended lemmas when using a POS-aware model.
@@ -50,7 +51,9 @@ def words_window(sent_tokens, tid, replace_target = False):
 ## Get word vectors
 #
 
-if ELMo_model_path:
+if gensim_model_path:
+    import gensim
+elif ELMo_model_path:
     import elmoformanylangs
     logging.disable(logging.WARNING) # stop ELMo for printing out loads of stuff to the console
     embedding = elmoformanylangs.Embedder(ELMo_model_path)
@@ -63,14 +66,18 @@ else:
 #
 ## Load or train the model for estimating 'gibberish'.
 #
-model = GibberishEstimator(embedding, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, use_cuda=use_cuda, use_elmo=(True if ELMo_model_path else False))
-if use_cuda:
-    model = model.cuda()
+if not gensim_model_path:
+    model = GibberishEstimator(embedding, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, use_cuda=use_cuda, use_elmo=(True if ELMo_model_path else False))
+    if use_cuda:
+        model = model.cuda()
 
-optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=learning_rate, weight_decay=reg_rate)
-loss = torch.nn.BCELoss() # binary cross-entropy
+    optimizer = torch.optim.SGD([p for p in model.parameters() if p.requires_grad], lr=learning_rate, weight_decay=reg_rate)
+    loss = torch.nn.BCELoss() # binary cross-entropy
 
-if os.path.isfile(model_path):
+if gensim_model_path:
+    print('Loading gensim model from {}.'.format(gensim_model_path))
+    model = gensim.models.Word2Vec.load(gensim_model_path)
+elif os.path.isfile(model_path):
     model.load_state_dict(torch.load(model_path))
     print('A pretrained model loaded from {}'.format(model_path))
 else:
@@ -471,7 +478,15 @@ def predict_with_subset(sent, token_id, subset_name, sense_wordids, sense_ngbs, 
                 senses_considered += 1 # it also counts as "considered"
             continue
         senses_considered += 1
-        if ELMo_model_path:
+        if gensim_model_path:
+            tested_versions = []
+            for ngb_word in ngbs:
+                changed_sent = copy(sent)
+                changed_sent[token_id] = ngb_word
+                tested_versions.append(changed_sent)
+            probs = model.score(tested_versions, total_sentences=len(tested_versions))
+            sense_probs[sid] = float(np.mean(probs))
+        elif ELMo_model_path:
             # Send ngb_words in bulk to the model and then populate sense_probs.
             probs = model([words_window(sent, token_id,
                                        replace_target=ngb_word)
@@ -530,6 +545,8 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
 
     if ELMo_model_path:
         reference_prob = model([words_window(sent, token_id)]).detach().cpu()
+    elif gensim_model_path:
+        reference_prob = model.score([sent], total_sentences=1)[0]
     else:
         if POS_extended_model:
             fill_sample(POS_extended_lemma(token_lemma, tag), sent, token_id)
@@ -606,7 +623,8 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
         for sense_n, wordid in enumerate(sense_wordids):
             if descriptions_path:
                 desc_lemmas = []
-                expected_path = descriptions_path+'/'+wordid+'.txt'
+                sense_variant_n = skl_wordid_symbols[wordid].split('_')[-1]
+                expected_path = descriptions_path+'/'+wordid+'_'+sent[token_id]+'_'+sense_variant_n+'.txt'
                 if os.path.isfile(expected_path):
                     with open(expected_path) as descs_file:
                         parsed_sents = json.loads(descs_file.read())

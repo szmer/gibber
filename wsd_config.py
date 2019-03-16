@@ -21,9 +21,16 @@ concraft_model_path = '/home/szymon/lingwy/concraft/model-04-09-2018.gz'
 # model will be either trained and saved to, or loaded from this file (if exists)
 model_path = 'models/nkjp1m_nopos.torch'
 
+#
+# Alternative model options (all are mutually exclusive).
+#
 ELMo_model_path = False#'/home/szymon/lingwy/elmo/pl_elmo' # can be False if you don't want to use ELMo, not compatible with POS extension, elmoformanylangs package needed
 POS_extended_model = False
+gensim_model_path = '../gensim_Embeddings/nkjp+wiki-lemmas-all-300-skipg-hs'
 
+#
+# Model training settings.
+#
 # model training settings:
 use_cuda = True
 window_size = 4 # how many words to consider on both sides of the target
@@ -53,7 +60,7 @@ full_diagnostics = False # print detailed diagnostics for each prediction case?
 diagnostics_when_23_fails = False # show diagnostics for cases when subset 2 or 3 fails and the 1st is correct
 
 # baseline.py config, ignored by experim.py
-baseline = "first-variant" # "random" or "first-variant"
+baseline = "random" # "random" or "first-variant"
 
 # If this is not False, four predictions will be printed to CSV files, containing in their
 # columns: lemma, tag, sense variant number, lexical id (ie. Wordnet unit identifier)
@@ -70,6 +77,6 @@ annot_sentences_path = "oznaczenia-wszystko-plwordnet-gotowe-new.csv"
 #
 # Mass description parsing config.
 #
-mass_parsing_mode = 'lexids' # corpus or lexids
-mass_parsing_lexids_file = 'remaining'
-mass_parsing_path = './parsed_descs/'
+mass_parsing_mode = 'identifiers' # corpus (ie. what is needed for its annotation) or identifiers
+mass_parsing_identifiers_file = 'remaining'
+mass_parsing_path = './parsy2/'

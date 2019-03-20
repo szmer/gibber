@@ -3,7 +3,7 @@ from operator import itemgetter
 from lxml import etree
 
 def load_skladnica_wn2(skladnica_path, skladnica_sections_index_path):
-    """Returns a list of sentences, as list of lemmas, and a set of words. The first has pairs: (lemma, true_sense, tag),
+    """Returns a list of sentences, as list of lemmas, and a set of words. The first has pairs: (form, lemma, true_sense, tag),
     the second: (lemma, tag)"""
     sents = [] # pairs: (word lemma, lexical unit id [or None])
     words = set() # all unique words that are present
@@ -28,8 +28,6 @@ def load_skladnica_wn2(skladnica_path, skladnica_sections_index_path):
                         if tree.find('.//plwn_interpretation') is None:
                             continue
                         
-                        sent_id = filename[:-len('.xml')]
-                        
                         # Collect the list of sentence lemmas.
                         sent = []
                         for elem in tree.iterfind('node[@chosen]'):
@@ -38,20 +36,21 @@ def load_skladnica_wn2(skladnica_path, skladnica_sections_index_path):
                                 if elem.find('.//luident') is not None: # if word-sense annotation is available
                                     lexical_id = elem.find('.//luident').text+'_'
 
+                                form = elem.find("terminal").find("orth").text
                                 lemma = elem.find("terminal").find("base").text
                                 if lemma is None: # happens for numbers
-                                    lemma = elem.find("terminal").find("orth").text
+                                    lemma = form
                                 lemma = lemma.lower()
                                 tag = elem.find('.//f[@type]').text # should be <f type="tag">
-                                sent.append((int(elem.attrib['from']), lemma, lexical_id, tag))
+                                sent.append((int(elem.attrib['from']), form, lemma, lexical_id, tag))
                                 words.add((lemma, tag))
                         sent.sort(key=itemgetter(0))
-                        sent = [(token, lexical_id, tag) for num, token, lexical_id, tag in sent]
+                        sent = [(form, lemma, lexical_id, tag) for num, form, lemma, lexical_id, tag in sent]
                         sents.append(sent)
     return sents, words
 
 def load_wn3_corpus(annot_sentences_path):
-    """Returns a list of sentences, as list of lemmas, and a set of words. The first has pairs: (lemma, true_sense, tag),
+    """Returns a list of sentences, as list of lemmas, and a set of words. The first has pairs: (form, lemma, true_sense, tag),
     the second: (lemma, tag)"""
     sents = [] # pairs: (word lemma, lexical unit id [or None])
     words = set() # all unique words that are present
@@ -66,9 +65,9 @@ def load_wn3_corpus(annot_sentences_path):
                 sent = []
             else:
                 if re.match('\\d+', true_sense):
-                    sent.append((lemma.lower(), '_'+true_sense, tag))
+                    sent.append((form, lemma.lower(), '_'+true_sense, tag))
                 else:
-                    sent.append((lemma.lower(), None, tag))
+                    sent.append((form, lemma.lower(), None, tag))
                 words.add((lemma.lower(), tag))
 
     return sents, words

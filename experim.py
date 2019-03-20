@@ -91,6 +91,16 @@ else:
     outd = False
     outdr = False
     outv = False
+def print_null(): # for cases when we have no actual prediction
+    print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=out1)
+    print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=out2)
+    print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=out3)
+    print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=out4)
+    if use_descriptions:
+        print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=outd)
+        print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=outdr)
+    if give_voted_pred:
+        print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=outv)
 
 def rate_decision(decision, result_cat, new_word, output_file=False, fallback_decision=None, fallback_wordsets=[]):
     """Return a boolean, whether the decision was correct."""
@@ -101,13 +111,13 @@ def rate_decision(decision, result_cat, new_word, output_file=False, fallback_de
         sense_id, prob, senses_count, considered_sense_count = fallback_decision
     else:
         if output_file:
-            print('{},{},{},{}'.format(lemma, tag, '?', '?'), file=output_file)
+            print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=output_file)
         return good
 
     if output_file:
         sense_data = sense_id.split('_')
         # add variant number and word id to printed prediction
-        print('{},{},{},{}'.format(lemma, tag, sense_data[2], sense_data[0]), file=output_file)
+        print('{},{},{},{},{}'.format(form, lemma, tag, sense_data[2], sense_data[0]), file=output_file)
     # Increase occurence counts.
     result_cat.num_some_ngbs += 1
     if senses_count == considered_sense_count:
@@ -133,18 +143,12 @@ print('Performing the test on sense-annotated sentences.')
 for (sid, sent) in enumerate(sents):
     print('Testing sentence', sid+1)
     for (tid, token_data) in enumerate(sent):
-        lemma, true_sense, tag = token_data[0], token_data[1], token_data[2]
+        form, lemma, true_sense, tag = token_data[0], token_data[1], token_data[2], token_data[3]
+        form = form.replace(',', '","')
+        lemma = lemma.replace(',', '","')
         if true_sense is None:
             if output_prefix:
-                print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out1)
-                print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out2)
-                print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out3)
-                print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out4)
-                if use_descriptions:
-                    print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=outd)
-                    print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=outdr)
-                    if give_voted_pred:
-                        print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=outv)
+                print_null()
             continue
 
         num_all += 1
@@ -165,10 +169,15 @@ for (sid, sent) in enumerate(sents):
                     tid, verbose=full_diagnostics)
         except LookupError as err:
             print(err)
+            if output_prefix:
+                print_null()
             words_checked_rest.add(lemma)
             continue
 
-        if [None, None, None, None] == [decision1, decision2, decision3, decision4]:
+        if [decision1, decision2, decision3, decision4, decision5, decision6, decision7].count(None) == 7:
+            print('No decision for {}'.format(token_data))
+            if output_prefix:
+                print_null()
             words_checked_rest.add(lemma)
             continue
 

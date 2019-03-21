@@ -21,16 +21,19 @@ concraft_model_path = '/home/szymon/lingwy/concraft/model-04-09-2018.gz'
 # A voted prediction (relations1, relations4, descriptions) - descriptions must be used! 
 give_voted_pred = True
 
+# How probabilities of sentence from neighbors in one set should be integrated?
+probability_collection = 'max' # max or average
+
 # model will be either trained and saved to, or loaded from this file (if exists)
-#model_path = 'models/nkjp1m_nopos.torch'
-model_path = 'models/nkjp1m_nopos_elmo.torch'
+model_path = 'models/nkjp1m_nopos.torch'
+#model_path = 'models/nkjp1m_nopos_elmo.torch'
 
 #
 # Alternative model options (all are mutually exclusive).
 #
-ELMo_model_path = False #'/home/szymon/lingwy/elmo/pl_elmo' # can be False if you don't want to use ELMo, not compatible with POS extension, elmoformanylangs package needed
+ELMo_model_path = False#'/home/szymon/lingwy/elmo/pl_elmo' # can be False if you don't want to use ELMo, not compatible with POS extension, elmoformanylangs package needed
 POS_extended_model = False
-gensim_model_path = '../gensim_Embeddings/nkjp+wiki-lemmas-all-300-skipg-hs'
+gensim_model_path = False#'../gensim_Embeddings/nkjp+wiki-lemmas-all-300-skipg-hs'
 
 #
 # Model training settings.
@@ -68,7 +71,7 @@ baseline = "random" # "random" or "first-variant"
 
 # If this is not False, four predictions will be printed to CSV files, containing in their
 # columns: lemma, tag, sense variant number, lexical id (ie. Wordnet unit identifier)
-output_prefix = 'gensim_prediction_v_'
+output_prefix = 'trainmod_prediction_maxv_'
 
 # only for wordnet2_annot mode
 skladnica_sections_index_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/sections.txt"

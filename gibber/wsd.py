@@ -11,7 +11,8 @@ from torch.autograd import Variable
 from torch import nn
 import torch.utils.data
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path, gensim_model_path, give_voted_pred
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path, gensim_model_path, give_voted_pred, probability_collection
+
 from gibber.gibberish_estimator import GibberishEstimator
 from gibber.mixed_dataset import MixedDataset
 
@@ -404,17 +405,22 @@ def add_word_neighborhoods(words):
                     for target_syns in skl_neighbor_syns1[synset.get('id')]:
                         # for wordids that are in that other synset - add this wordid from this synset
                         for receiver in rskl_wordid_synsets[target_syns]:
-                            skl_wordid_neighbor_ids1[receiver].append(unit.text.lower())
+                            skl_wordid_neighbor_ids1[receiver].append(unit.text)
             if synset.get('id') in skl_neighbor_syns2:
                 for unit in synset.iterfind('unit-id'):
                     for target_syns in skl_neighbor_syns2[synset.get('id')]:
                         for receiver in rskl_wordid_synsets[target_syns]:
-                            skl_wordid_neighbor_ids2[receiver].append(unit.text.lower())
+                            skl_wordid_neighbor_ids2[receiver].append(unit.text)
             if synset.get('id') in skl_neighbor_syns1:
                 for unit in synset.iterfind('unit-id'):
                     for target_syns in skl_neighbor_syns3[synset.get('id')]:
                         for receiver in rskl_wordid_synsets[target_syns]:
-                            skl_wordid_neighbor_ids3[receiver].append(unit.text.lower())
+                            skl_wordid_neighbor_ids3[receiver].append(unit.text)
+            # Also add the member word units as subset 1 neighbors.
+            for unit in synset.iterfind('unit-id'):
+                unit_id = unit.text
+                if not synset.get('id') in skl_wordid_neighbor_ids1[unit_id]:
+                    skl_wordid_neighbor_ids1[unit_id].append(synset.get('id'))
 
         # (get reverses of these)
         rskl_wordid_neighbor_ids1 = reverse_list_dict(skl_wordid_neighbor_ids1)
@@ -485,34 +491,56 @@ def predict_with_subset(sent, token_id, subset_name, sense_wordids, sense_ngbs, 
                 changed_sent[token_id] = ngb_word
                 tested_versions.append(changed_sent)
             probs = model.score(tested_versions, total_sentences=len(tested_versions))
-            sense_probs[sid] = float(np.mean(probs))
+            if probability_collection == 'average':
+                sense_probs[sid] = float(np.mean(probs))
+            elif probability_collection == 'max':
+                sense_probs[sid] = float(np.max(probs))
+            else:
+                raise ValueError('{} probability collection setting not max or average'.format(probability_collection))
         elif ELMo_model_path:
             # Send ngb_words in bulk to the model and then populate sense_probs.
             probs = model([words_window(sent, token_id,
                                        replace_target=ngb_word)
                                        for ngb_word in ngbs]).detach().cpu().numpy()
-            sense_probs[sid] = float(np.mean(probs))
+            if probability_collection == 'average':
+                sense_probs[sid] = float(np.mean(probs))
+            elif probability_collection == 'max':
+                sense_probs[sid] = float(np.max(probs))
+            else:
+                raise ValueError('{} probability collection setting not max or average'.format(probability_collection))
         else:
             for ngb_word in ngbs:
                 if POS_extended_model: # assume the same tag/POS as target
                     fill_sample(POS_extended_lemma(ngb_word, tag), sent, token_id)
                 else:
                     fill_sample(ngb_word, sent, token_id)
-                sense_probs[sid] += model(torch.LongTensor(sample)).detach().cpu()
+                prob = model(torch.LongTensor(sample)).detach().cpu()
+                if probability_collection == 'average':
+                    sense_probs[sid] += prob
+                elif probability_collection == 'max':
+                    if prob > sense_probs[sid]:
+                        sense_probs[sid] = prob
+                else:
+                    raise ValueError('{} probability collection setting not max or average'.format(probability_collection))
 
             # We have average prob of any neighbor of this sense
-            sense_probs[sid] /= sense_ngbcounts[sid]
+            if probability_collection == 'average':
+                sense_probs[sid] /= sense_ngbcounts[sid]
         # We have average prob of any neighbor of this sense + carry the input from the fallback
         # (note that it can be ignored due to zero neighbors)
-        sense_probs[sid] = (sense_probs[sid] * sense_ngbcounts[sid]
-                                    / sense_ngbcounts[sid])
         if fallback_probs:
-            sense_probs[sid] += (fallback_probs[sid] * fallback_ngbcounts[sid]
-                                    / fallback_ngbcounts[sid])
+            if probability_collection == 'average':
+                sense_probs[sid] += (fallback_probs[sid] * fallback_ngbcounts[sid]
+                                            / fallback_ngbcounts[sid])
+            else:
+                if probability_collection != 'max':
+                    raise ValueError('{} probability collection setting not max or average'.format(probability_collection))
+                if fallback_probs[sid] > sense_probs[sid]:
+                    sense_probs[sid] = fallback_probs[sid]
 
         if verbose:
             print('* Sense {}: {}'.format(skl_wordid_symbols[sense_wordids[sid]], ngbs))
-    winner_id, predicted_sense, sense_normd_probs = normalize_and_decide(sense_probs, sense_wordids)
+    winner_id, predicted_sense, sense_normd_probs = normalize_and_decide(sense_probs, sense_wordids, verbose=verbose)
     decision = (predicted_sense, sense_normd_probs[winner_id], len(sense_wordids), senses_considered)
     return decision
 
@@ -530,7 +558,7 @@ def merge_predictions(subset_name, sense_wordids, reference_prob, ngbcounts, pro
             merged_probs[sense_n] = 0.0
             for (pred_n, count) in enumerate(counts):
                 merged_probs[sense_n] += count * probs[pred_n][sense_n]
-    winner_id, predicted_sense, sense_normd_probs = normalize_and_decide(merged_probs, sense_wordids)
+    winner_id, predicted_sense, sense_normd_probs = normalize_and_decide(merged_probs, sense_wordids, verbose=verbose)
     decision = (predicted_sense, sense_normd_probs[winner_id], len(sense_wordids), senses_considered)
     return decision, merged_probs
 

@@ -36,30 +36,25 @@ class ResultCategory(object):
         self.num_all_ngbs = 0
         self.good_some_ngbs = 0
         self.good_all_ngbs = 0
+        self.good_notfirstvar = 0
 
-        self.unique_good_some_ngbs = 0
-        self.unique_good_all_ngbs = 0
-        self.words_checked = set() # for determining uniqueness, only words with 'all' coverage
-
-    def print_scores(self, num_all, num_all_unique):
+    def print_scores(self, num_all, num_notfirstvar):
         print('All: {}, good: {}, accuracy: {}'.format(num_all, self.good_some_ngbs,
                 (self.good_some_ngbs/num_all if num_all > 0 else 'none')))
-        print('Unique: {}, good: {}, accuracy: {}'.format(num_all_unique, self.unique_good_some_ngbs,
-                (self.unique_good_some_ngbs/num_all_unique if num_all_unique > 0 else 'none')))
         print('With full ngb coverage: {}, good: {}, accuracy: {}'.format(self.num_all_ngbs, self.good_all_ngbs,
                 (self.good_all_ngbs/self.num_all_ngbs if self.num_all_ngbs > 0 else 'none')))
-        full_unique_counts = len(self.words_checked) + sum([len(c.words_checked) for c in self.fallback_cats])
-        print('Unique w/full coverage: {}, good: {}, accuracy: {}'.format(len(self.words_checked), self.unique_good_all_ngbs,
-                (self.unique_good_all_ngbs/full_unique_counts if full_unique_counts > 0 else 'none')))
+        if mode == 'wordnet3_annot':
+            print('First variant excluded: {}, good: {}, accuracy: {}'.format(num_notfirstvar, self.good_notfirstvar,
+                (self.good_notfirstvar/num_notfirstvar if num_notfirstvar > 0 else 'none')))
 
 ## numbers indicate the relation group,
 ## A - words where at least one sense has known neighbors,
 ## B - words where all senses have known neighbors,
 ## uq - no word repetitions
 ## "Good" values will be divided by N to get accuracy.
-words_checked_some_senses = set() # for determining uniqueness
 words_checked_rest = set() # for calculating the total performance
 num_all = 0 # number of all occurences where we have some true sense provided
+num_notfirstvar = 1
 
 relations1 = ResultCategory()
 relations2 = ResultCategory(fallback_cats=[relations1])
@@ -102,7 +97,7 @@ def print_null(): # for cases when we have no actual prediction
     if give_voted_pred:
         print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=outv)
 
-def rate_decision(decision, result_cat, new_word, output_file=False, fallback_decision=None, fallback_wordsets=[]):
+def rate_decision(decision, true_sense, result_cat, new_word, output_file=False, fallback_decision=None):
     """Return a boolean, whether the decision was correct."""
     good = False
     if decision is not None:
@@ -114,29 +109,24 @@ def rate_decision(decision, result_cat, new_word, output_file=False, fallback_de
             print('{},{},{},{},{}'.format(form, lemma, tag, '?', '?'), file=output_file)
         return good
 
+    sense_data = sense_id.split('_')
     if output_file:
-        sense_data = sense_id.split('_')
         # add variant number and word id to printed prediction
         print('{},{},{},{},{}'.format(form, lemma, tag, sense_data[2], sense_data[0]), file=output_file)
     # Increase occurence counts.
     result_cat.num_some_ngbs += 1
     if senses_count == considered_sense_count:
         result_cat.num_all_ngbs += 1
+    if mode == 'wordnet3_annot':
+        variant_num = true_sense[1:] # note that here we care about truth, not prediction!
     # Correct?
     if sense_match(sense_id, true_sense):
         result_cat.good_some_ngbs += 1
         good = True
         if senses_count == considered_sense_count:
             result_cat.good_all_ngbs += 1
-    # Unique word indication.
-    if new_word:
-        if senses_count == considered_sense_count and not any(((lemma in ws) for ws in fallback_wordsets)):
-            result_cat.words_checked.add(lemma) # marked as checked with all info on all senses
-
-        if sense_match(sense_id, true_sense):
-            result_cat.unique_good_some_ngbs += 1
-            if senses_count == considered_sense_count:
-                result_cat.unique_good_all_ngbs += 1
+        if mode == 'wordnet3_annot' and variant_num == '1':
+            result_cat.good_notfirstvar += 1
     return good
 
 print('Performing the test on sense-annotated sentences.')
@@ -152,6 +142,10 @@ for (sid, sent) in enumerate(sents):
             continue
 
         num_all += 1
+        if mode == 'wordnet3_annot':
+            variant_num = true_sense[1:]
+            if variant_num == '1':
+                num_notfirstvar += 1
 
         try:
             if use_descriptions:
@@ -182,20 +176,17 @@ for (sid, sent) in enumerate(sents):
             continue
 
         new_word = False
-        if not lemma in words_checked_some_senses:
-            words_checked_some_senses.add(lemma)
-            new_word = True
 
         # preserve an indication if the first decision was good to show diagnostics when 3 or 3 fails
-        good1 = rate_decision(decision1, relations1, new_word, output_file=out1)
-        good2 = rate_decision(decision2, relations2, new_word, output_file=out2, fallback_decision=decision1, fallback_wordsets=[relations1.words_checked])
-        good3 = rate_decision(decision3, relations3, new_word, output_file=out3, fallback_decision=decision1, fallback_wordsets=[relations1.words_checked])
-        rate_decision(decision4, relations4, new_word, output_file=out4, fallback_wordsets=[relations1.words_checked, relations2.words_checked, relations3.words_checked])
+        good1 = rate_decision(decision1, true_sense, relations1, new_word, output_file=out1)
+        good2 = rate_decision(decision2, true_sense, relations2, new_word, output_file=out2, fallback_decision=decision1)
+        good3 = rate_decision(decision3, true_sense, relations3, new_word, output_file=out3, fallback_decision=decision1)
+        rate_decision(decision4, true_sense, relations4, new_word, output_file=out4)
         if use_descriptions:
-            rate_decision(decision5, unitdescs, new_word, output_file=outd)
-            rate_decision(decision6, unitdescs_withrels, new_word, output_file=outdr, fallback_wordsets=[relations1.words_checked, relations2.words_checked, relations3.words_checked])
+            rate_decision(decision5, true_sense, unitdescs, new_word, output_file=outd)
+            rate_decision(decision6, true_sense, unitdescs_withrels, new_word, output_file=outdr)
             if give_voted_pred:
-                rate_decision(decision7, voted_pred, new_word, output_file=outv)
+                rate_decision(decision7, true_sense, voted_pred, new_word, output_file=outv)
 
         # Re-run with diagnostics when diagnostics_when_23_fails condition is true.
         if diagnostics_when_23_fails and (not full_diagnostics) and good1 and not (good2 and good3):
@@ -214,21 +205,19 @@ if output_prefix:
         if give_voted_pred:
             outv.close()
 
-num_all_unique = len(words_checked_some_senses)+len(words_checked_rest) # "rest" only captures fundamental prediction failure
-
 print('\nRelations subset 1')
-relations1.print_scores(num_all, num_all_unique)
+relations1.print_scores(num_all, num_notfirstvar)
 print('\nRelations subset 2')
-relations2.print_scores(num_all, num_all_unique)
+relations2.print_scores(num_all, num_notfirstvar)
 print('\nRelations subset 3')
-relations3.print_scores(num_all, num_all_unique)
+relations3.print_scores(num_all, num_notfirstvar)
 print('\nRelations subset 4')
-relations4.print_scores(num_all, num_all_unique)
+relations4.print_scores(num_all, num_notfirstvar)
 if use_descriptions:
     print('\nUnit descriptions')
-    unitdescs.print_scores(num_all, num_all_unique)
+    unitdescs.print_scores(num_all, num_notfirstvar)
     print('\nUnit descriptions+relations.')
-    unitdescs_withrels.print_scores(num_all, num_all_unique)
+    unitdescs_withrels.print_scores(num_all, num_notfirstvar)
     if give_voted_pred:
         print('\nVoted prediction.')
-        voted_pred.print_scores(num_all, num_all_unique)
+        voted_pred.print_scores(num_all, num_notfirstvar)

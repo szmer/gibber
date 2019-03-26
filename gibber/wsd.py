@@ -88,8 +88,8 @@ else:
     train_sents = []
 
     if nkjp_format == 'plain':
-        if POS_extended_model:
-            raise ValueError('Cannot train a POS-extended model from plain corpus format.')
+        if POS_extended_model or ELMo_model_path:
+            raise ValueError('Cannot train a POS-extended model or an ELMo-based model from plain corpus format.')
         with open(nkjp_path) as corp_file:
             for line in corp_file:
                 lemmas = line.strip().split()
@@ -106,18 +106,24 @@ else:
                     continue
                 tree = etree.parse(tokens_filepath)
                 for sent_subtree in tree.iterfind('.//{http://www.tei-c.org/ns/1.0}s[@{http://www.w3.org/XML/1998/namespace}id]'):
-                    sent_lemmas = []
+                    sent_words = []
                     for seg in sent_subtree.iterfind('.//{http://www.tei-c.org/ns/1.0}f[@name]'):
-                        if seg['name'] != 'disamb':
-                            continue
-                        interp = seg.find('.//{http://www.tei-c.org/ns/1.0}string').text.split(':')
-                        lemma = interp[0].lower()
-                        tag = ':'.join(interp[1:])
-                        if POS_extended_model:
-                            lemma = POS_extended_lemma(lemma, tag)
-                        sent_lemmas.append(lemma)
+                        if not ELMo_model_path:
+                            if seg.attrib['name'] != 'disamb':
+                                continue
+                            interp = seg.find('.//{http://www.tei-c.org/ns/1.0}string').text.split(':')
+                            lemma = interp[0].lower()
+                            tag = ':'.join(interp[1:])
+                            if POS_extended_model:
+                                lemma = POS_extended_lemma(lemma, tag)
+                            sent_words.append(lemma)
+                        elif ELMo_model_path: # get forms, not lemmas
+                            if seg.attrib['name'] != 'orth':
+                                continue
+                            form = seg.find('.//{http://www.tei-c.org/ns/1.0}string').text.lower()
+                            sent_words.append(form)
                     train_sents += [[]]
-                    for word in sent_lemmas:
+                    for word in sent_words:
                         train_sents[-1].append(word)
                         words_count += 1
 
@@ -129,7 +135,7 @@ else:
     ## We want a training set of multiword contexts (train) and target words (labels);
     ## the model will learn to distinguish genuine from fake (negative) context-target pairs
     batch_size = 128
-    if ELMo_model_path: # corpus preparation for ELMo case, as lemma strings
+    if ELMo_model_path: # corpus preparation for ELMo case, as strings
         sample_n = 0
         train = []
         labels = np.ones(((words_count + words_count) * corp_runs,),
@@ -334,9 +340,9 @@ def add_word_neighborhoods(words):
         ## Collect word ids and synsets for new words.
         # Wordnet lexical ID's of lemmas present in Składnica.
         for lex_unit in wordnet_xml.iterfind('lexical-unit'):
-            form = lex_unit.get('name').lower()
-            if form in new_words or rm_sie(form) in new_words:
-                skl_word_wordids[form].append(lex_unit.get('id'))
+            lemma = lex_unit.get('name').lower()
+            if lemma in new_words or rm_sie(lemma) in new_words:
+                skl_word_wordids[lemma].append(lex_unit.get('id'))
                 # Preserve the variant number in full symbol.
                 skl_wordid_symbols[lex_unit.get('id')] = (lex_unit.get('id')
                                                           +'_'+lex_unit.get('pos')
@@ -459,8 +465,12 @@ def normalize_and_decide(sense_probs, sense_wordids, verbose=False):
     # Get normalized probabilities.
     normal_sum = sum(sense_probs)
     sense_normd_probs = []
-    for prob in sense_probs:
-        sense_normd_probs.append(prob/normal_sum)
+    if normal_sum != 0:
+        for prob in sense_probs:
+            sense_normd_probs.append(prob/normal_sum)
+    else:
+        for prob in sense_probs:
+            sense_normd_probs.append(0.0)
         
     winners = [sid for (sid, p) in enumerate(sense_normd_probs) if p == max(sense_normd_probs)]
     winner_id = choice(winners)
@@ -486,10 +496,12 @@ def predict_with_subset(sent, token_id, subset_name, sense_wordids, sense_ngbs, 
         senses_considered += 1
         if gensim_model_path:
             tested_versions = []
+            cleaned_sent = [t for t in sent if re.match('\\w+', t)] # clean tokens that were thrown out on gensim model training
+            actual_token_id = len([t for t in sent[:token_id] if re.match('\\w+', t)])
             for ngb_word in ngbs:
-                changed_sent = copy(sent)
-                changed_sent[token_id] = ngb_word
-                tested_versions.append(changed_sent)
+                changed_cleaned_sent = copy(cleaned_sent)
+                changed_cleaned_sent[actual_token_id] = ngb_word
+                tested_versions.append(changed_cleaned_sent)
             probs = model.score(tested_versions, total_sentences=len(tested_versions))
             if probability_collection == 'average':
                 sense_probs[sid] = float(np.mean(probs))

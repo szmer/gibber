@@ -1,6 +1,6 @@
-from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, pl_wordnet_path, baseline, full_diagnostics
+from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, pl_wordnet_path, baseline, full_diagnostics, kpwr_path
 from gibber.wsd import add_word_neighborhoods, sense_match, random_prediction, first_variant_prediction
-from gibber.annot_corp_loader import load_skladnica_wn2, load_wn3_corpus
+from gibber.annot_corp_loader import load_skladnica_wn2, load_wn3_corpus, load_kpwr_corpus
 
 print('mode: {}\nNKJP: {}\nWordnet: {}'.format(mode, nkjp_index_path, pl_wordnet_path))
 print('baseline: {}'.format(baseline))
@@ -13,9 +13,10 @@ words = set() # all unique words that are present
 
 if mode == 'wordnet2_annot':
     sents, words = load_skladnica_wn2(skladnica_path, skladnica_sections_index_path)
-
 if mode == 'wordnet3_annot':
     sents, words = load_wn3_corpus(annot_sentences_path)
+if mode == 'kpwr_annot':
+    sents, words = load_kpwr_corpus(kpwr_path)
 
 #
 # Load all the necessary wordnet data.
@@ -32,7 +33,7 @@ if output_prefix:
 
 for sent in sents:
     for (tid, token_data) in enumerate(sent):
-        lemma, true_sense, tag = token_data[0], token_data[1], token_data[2]
+        lemma, true_sense, tag = token_data[1], token_data[2], token_data[3]
         if true_sense is None:
             if output_prefix:
                 print('{},{},{},{}'.format(lemma, tag, '<<<', '<<<'), file=out)
@@ -57,6 +58,7 @@ for sent in sents:
             print(err)
             continue
 
+        print('predicted {} true {}'.format(decision, true_sense))
         if decision is not None and sense_match(decision, true_sense):
             num_good += 1
         if output_prefix:

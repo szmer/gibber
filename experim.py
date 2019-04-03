@@ -1,6 +1,6 @@
-from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, full_diagnostics, diagnostics_when_23_fails, pl_wordnet_path, use_descriptions, give_voted_pred, ELMo_model_path
+from wsd_config import nkjp_index_path, mode, skladnica_sections_index_path, skladnica_path, annot_sentences_path, output_prefix, full_diagnostics, diagnostics_when_23_fails, pl_wordnet_path, use_descriptions, give_voted_pred, ELMo_model_path, use_forms, kpwr_path
 from gibber.wsd import add_word_neighborhoods, predict_sense, sense_match
-from gibber.annot_corp_loader import load_skladnica_wn2, load_wn3_corpus
+from gibber.annot_corp_loader import load_skladnica_wn2, load_wn3_corpus, load_kpwr_corpus
 
 print('mode: {}\nNKJP: {}\nWordnet: {}'.format(mode, nkjp_index_path, pl_wordnet_path))
 
@@ -12,9 +12,10 @@ words = set() # all unique tagged words that are present
 
 if mode == 'wordnet2_annot':
     sents, words = load_skladnica_wn2(skladnica_path, skladnica_sections_index_path)
-
 if mode == 'wordnet3_annot':
     sents, words = load_wn3_corpus(annot_sentences_path)
+if mode == 'kpwr_annot':
+    sents, words = load_kpwr_corpus(kpwr_path)
 
 #
 # Load all the necessary wordnet data.
@@ -120,7 +121,7 @@ def rate_decision(decision, true_sense, result_cat, new_word, output_file=False,
     if mode == 'wordnet3_annot':
         variant_num = true_sense[1:] # note that here we care about truth, not prediction!
     # Correct?
-    if sense_match(sense_id, true_sense):
+    if sense_match(sense_id, true_sense): # the prediction is "full", and the truth "partial" in current corpora
         result_cat.good_some_ngbs += 1
         good = True
         if senses_count == considered_sense_count:
@@ -151,17 +152,17 @@ for (sid, sent) in enumerate(sents):
             if use_descriptions:
                 if give_voted_pred:
                     decision1, decision2, decision3, decision4, decision5, decision6, decision7 = predict_sense(lemma, tag,
-                        ([tok_info[1] for tok_info in sent] if ELMo_model_path # give only lemmas
+                        ([tok_info[1] for tok_info in sent] if ELMo_model_path or use_forms # give only lemmas
                             else [tok_info[0].lower() for tok_info in sent]), # give forms instead for ELMo
                         tid, verbose=full_diagnostics)
                 else:
                     decision1, decision2, decision3, decision4, decision5, decision6 = predict_sense(lemma, tag,
-                        ([tok_info[1] for tok_info in sent] if ELMo_model_path # give only lemmas
+                        ([tok_info[1] for tok_info in sent] if ELMo_model_path or use_forms # give only lemmas
                             else [tok_info[0].lower() for tok_info in sent]), # give forms instead for ELMo
                         tid, verbose=full_diagnostics)
             else:
                 decision1, decision2, decision3, decision4 = predict_sense(lemma, tag,
-                    ([tok_info[1] for tok_info in sent] if ELMo_model_path # give only lemmas
+                    ([tok_info[1] for tok_info in sent] if ELMo_model_path or use_forms # give only lemmas
                         else [tok_info[0].lower() for tok_info in sent]), # give forms instead for ELMo
                     tid, verbose=full_diagnostics)
         except LookupError as err:

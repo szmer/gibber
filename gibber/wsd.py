@@ -11,7 +11,7 @@ from torch.autograd import Variable
 from torch import nn
 import torch.utils.data
 
-from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path, gensim_model_path, give_voted_pred, probability_collection
+from wsd_config import nkjp_format, nkjp_index_path, nkjp_path, pl_wordnet_path, model_path, window_size, corp_runs, learning_rate, reg_rate, POS_extended_model, lstm_hidden_size, lstm_layers_count, lstm_is_bidirectional, freeze_embeddings, use_cuda, ELMo_model_path, epochs_count, use_descriptions, descriptions_path, gensim_model_path, give_voted_pred, probability_collection, use_forms
 
 from gibber.gibberish_estimator import GibberishEstimator
 from gibber.mixed_dataset import MixedDataset
@@ -108,7 +108,7 @@ else:
                 for sent_subtree in tree.iterfind('.//{http://www.tei-c.org/ns/1.0}s[@{http://www.w3.org/XML/1998/namespace}id]'):
                     sent_words = []
                     for seg in sent_subtree.iterfind('.//{http://www.tei-c.org/ns/1.0}f[@name]'):
-                        if not ELMo_model_path:
+                        if not ELMo_model_path and not use_forms:
                             if seg.attrib['name'] != 'disamb':
                                 continue
                             interp = seg.find('.//{http://www.tei-c.org/ns/1.0}string').text.split(':')
@@ -117,7 +117,7 @@ else:
                             if POS_extended_model:
                                 lemma = POS_extended_lemma(lemma, tag)
                             sent_words.append(lemma)
-                        elif ELMo_model_path: # get forms, not lemmas
+                        elif ELMo_model_path or use_forms: # get forms, not lemmas
                             if seg.attrib['name'] != 'orth':
                                 continue
                             form = seg.find('.//{http://www.tei-c.org/ns/1.0}string').text.lower()

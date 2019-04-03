@@ -1,4 +1,4 @@
-import os, csv, re
+import glob, os, csv, re
 from operator import itemgetter
 from lxml import etree
 
@@ -70,4 +70,34 @@ def load_wn3_corpus(annot_sentences_path):
                     sent.append((form, lemma.lower(), None, tag))
                 words.add((lemma.lower(), tag))
 
+    return sents, words
+
+def load_kpwr_corpus(kpwr_path):
+    sents = []
+    words = set()
+    for xml_path in glob.glob(kpwr_path+'/*.xml'):
+        if re.match('rel\.xml$', xml_path):
+            continue
+        with open(xml_path) as xml_file:
+            xml = etree.parse(xml_file)
+            for sent_obj in xml.iterfind('.//sentence'):
+                sent = []
+                senses_present = False
+                for tok_obj in sent_obj.iterfind('tok'):
+                    sense = False
+                    for prop_obj in tok_obj.iterfind('prop'):
+                        if prop_obj.attrib['key'] == 'wsd:sense:id':
+                            sense = prop_obj.text
+                            senses_present = True
+                    form = tok_obj.find('orth').text
+                    lex_obj = tok_obj.find('lex')
+                    lemma = lex_obj.find('base').text.lower()
+                    tag = lex_obj.find('ctag').text
+                    words.add((lemma, tag))
+                    if sense:
+                        sent.append((form, lemma.lower(), sense+'_', tag)) # senses are given as lexical ids
+                    else:
+                        sent.append((form, lemma.lower(), None, tag))
+                if senses_present and len(sent) > 0:
+                    sents.append(sent)
     return sents, words

@@ -24,7 +24,7 @@ concraft_model_path = '/home/szymon/lingwy/concraft/model-04-09-2018.gz'
 give_voted_pred = True
 
 # How probabilities of sentence from neighbors in one set should be integrated?
-probability_collection = 'max' # max or average
+probability_collection = 'average' # max or average
 
 # model will be either trained and saved to, or loaded from this file (if exists)
 model_path = 'models/nkjp1m_nopos.torch'
@@ -36,7 +36,7 @@ model_path = 'models/nkjp1m_nopos.torch'
 #
 ELMo_model_path = False #'/home/szymon/lingwy/elmo/pl_elmo' # can be False if you don't want to use ELMo, not compatible with POS extension, elmoformanylangs package needed
 POS_extended_model = False
-gensim_model_path = False #'../gensim_Embeddings/nkjp+wiki-lemmas-all-300-skipg-hs'
+gensim_model_path = '../gensim_Embeddings/nkjp+wiki-lemmas-all-300-skipg-hs'
 use_forms = False
 
 #
@@ -65,8 +65,8 @@ freeze_embeddings = True
 #
 
 #mode = "wordnet2_annot"
-#mode = "wordnet3_annot"
-mode = "kpwr_annot"
+mode = "wordnet3_annot"
+#mode = "kpwr_annot"
 
 full_diagnostics = False # print detailed diagnostics for each prediction case?
 diagnostics_when_23_fails = False # show diagnostics for cases when subset 2 or 3 fails and the 1st is correct
@@ -76,7 +76,7 @@ baseline = "random" # "random" or "first-variant"
 
 # If this is not False, four predictions will be printed to CSV files, containing in their
 # columns: lemma, tag, sense variant number, lexical id (ie. Wordnet unit identifier)
-output_prefix = 'trainmod_prediction_max_kpwr'
+output_prefix = 'gensim9_prediction_avg_'
 
 # only for wordnet2_annot mode
 skladnica_sections_index_path = "/home/szymon/lingwy/nkjp/skladnica_znacz/sections.txt"

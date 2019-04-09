@@ -1,5 +1,4 @@
 import json, os, re, logging
-from copy import copy
 from random import randint, shuffle, choice
 from collections import defaultdict
 from itertools import chain
@@ -47,6 +46,11 @@ def words_window(sent_tokens, tid, replace_target = False):
             + sent_tokens[tid+1 : tid+1+window_size]
             + [''] * (tid+window_size-len(sent_tokens)+1)
             )
+
+def clean_sentence_and_id(sent, token_id):
+    cleaned_sent = [t for t in sent if re.match('\\w+', t)] # clean tokens that were thrown out on gensim model training
+    actual_token_id = len([t for t in sent[:token_id] if re.match('\\w+', t)])
+    return cleaned_sent, actual_token_id
 
 #
 ## Get word vectors
@@ -496,12 +500,10 @@ def predict_with_subset(sent, token_id, subset_name, sense_wordids, sense_ngbs, 
         senses_considered += 1
         if gensim_model_path:
             tested_versions = []
-            cleaned_sent = [t for t in sent if re.match('\\w+', t)] # clean tokens that were thrown out on gensim model training
-            actual_token_id = len([t for t in sent[:token_id] if re.match('\\w+', t)])
+            cleaned_sent, actual_token_id = clean_sentence_and_id(sent, token_id)
             for ngb_word in ngbs:
-                changed_cleaned_sent = copy(cleaned_sent)
-                changed_cleaned_sent[actual_token_id] = ngb_word
-                tested_versions.append(changed_cleaned_sent)
+                changed_cleaned_version = words_window(cleaned_sent, actual_token_id, replace_target=ngb_word)
+                tested_versions.append(changed_cleaned_version)
             probs = model.score(tested_versions, total_sentences=len(tested_versions))
             if probability_collection == 'average':
                 sense_probs[sid] = float(np.mean(probs))
@@ -586,7 +588,8 @@ def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_
     if ELMo_model_path:
         reference_prob = model([words_window(sent, token_id)]).detach().cpu()
     elif gensim_model_path:
-        reference_prob = model.score([sent], total_sentences=1)[0]
+        cleaned_sent, actual_token_id = clean_sentence_and_id(sent, token_id)
+        reference_prob = model.score([words_window(cleaned_sent, actual_token_id)], total_sentences=1)[0]
     else:
         if POS_extended_model:
             fill_sample(POS_extended_lemma(token_lemma, tag), sent, token_id)

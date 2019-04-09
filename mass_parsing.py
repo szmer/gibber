@@ -2,7 +2,7 @@ import json, os
 
 import wsd_config
 from gibber import parsing
-from gibber.annot_corp_loader import load_wn3_corpus
+from gibber.annot_corp_loader import load_skladnica_wn2, load_wn3_corpus, load_kpwr_corpus
 
 from lxml import etree
 #
@@ -12,7 +12,14 @@ desired_identifiers = set()
 desired_words = set()
 
 if wsd_config.mass_parsing_mode == 'corpus':
-    _, tagged_words = load_wn3_corpus(wsd_config.annot_sentences_path)
+    if wsd_config.mode == 'wordnet3_annot':
+        _, tagged_words = load_wn3_corpus(wsd_config.annot_sentences_path)
+    elif wsd_config.mode == 'wordnet2_annot':
+        _, tagged_words = load_skladnica_wn2(wsd_config.skladnica_path, wsd_config.skladnica_sections_index_path)
+    elif wsd_config.mode == 'kpwr_annot':
+        _, tagged_words = load_kpwr_corpus(wsd_config.kpwr_path)
+    else:
+        raise NotImplementedError('unknown mode {}'.format(wsd_config.mode))
     desired_words = set([lemma for (lemma, tag) in tagged_words])
 else:
     with open(wsd_config.mass_parsing_identifiers_file, encoding='utf-8') as identifiers_file:

@@ -21,7 +21,7 @@ use_descriptions = True
 give_voted_pred = False
 
 # Use CUDA GPU capability if possible?
-use_cuda = True
+use_cuda = False
 
 #
 # Paths to essential resources.
@@ -99,7 +99,7 @@ mode = "wordnet3_annot"
 
 # If this is not False, four predictions will be printed to CSV files, containing in their
 # columns: lemma, tag, sense variant number, lexical id (ie. Wordnet unit identifier)
-output_prefix = 'gensim9_prediction_avg_'
+output_prefix = 'test_pred_'
 
 # Print detailed diagnostics for each prediction case?
 full_diagnostics = False
@@ -120,7 +120,7 @@ kpwr_path = "/home/szymon/lingwy/wielozn/kpwr2503"
 
 # baseline.py config, ignored by experim.py
 # baseline type: "random" or "first-variant"
-baseline = "random"
+baseline = "first-variant"
 
 ###############################################################################
 

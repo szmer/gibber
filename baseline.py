@@ -58,7 +58,8 @@ for sent in sents:
             print(err)
             continue
 
-        print('predicted {} true {}'.format(decision, true_sense))
+        if full_diagnostics:
+            print('predicted {} true {}'.format(decision, true_sense))
         if decision is not None and sense_match(decision, true_sense):
             num_good += 1
         if output_prefix:

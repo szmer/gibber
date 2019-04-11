@@ -312,7 +312,7 @@ def normalize_lemma(l, tag):
     return l
 
 def add_word_neighborhoods(words):
-    """Retrieve neighbor senses from Wordnet for all given (token, tag) pairs and store them
+    """Retrieve neighbor senses from Wordnet for all given (lemma, tag) pairs and store them
     in internal representation for later prediction."""
     # Normalize words with the helper function(s)
     norm_words = set()
@@ -569,7 +569,7 @@ def merge_predictions(subset_name, sense_wordids, reference_prob, ngbcounts, pro
 def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_POS=True):
     """Get token_lemma and tag as strings, the whole sent as a sequence of strings (forms or lemmas),
     and token_id indicating the index where the token is in the sentence. Return decisions made when
-    using subsets 1, 2, 3, 4 of relations as tuples (estimated probability, sense, retrieved_sense_count,
+    using subsets 1, 2, 3, 4 of relations, as tuples (estimated probability, sense, retrieved_sense_count,
     considered_sense_count) or None's if no decision. Retrieved_sense_count indicates how many
     senses were found for the lemma, and considered_sense_count for how many we were able to find
     a neighborhood with the given subset of relations. If discriminate_POS is set, only senses

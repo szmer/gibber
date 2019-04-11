@@ -2,41 +2,59 @@ If you want to run prepared experiments, review oprions in wsd_config.py and run
 experim.py (`python experim.py` or `python3 experim.py` depending on your
 environment).
 
-This document describes how to use `gibber_wsd` package.
+This document describes how to use `gibber` package.
 
 > from gibber.wsd import add_word_neighborhoods, predict_sense
+> from gibber.annot_corp_loader import load_wn3_corpus
+> sents, words_and_tags = load_wn3_corpus(path_to_corpus)
 > add_word_neighborhoods(words_and_tags) # a collection of (lemma, tag) pairs
-> predict_sense('uprzytomnić', 'ger:sg:acc:n:perf:aff', ['na', 'ten', 'uprzytomnić', 'dusza', 'pan', 'sapieha', 'wyjść', 'z', 'ciało', 'i', 'jąć', 'prosić', 'bóg', 'o', 'rychły', 'śmierć', ',', 'by', 'prędko', 'ten', 'szczęście', 'dostąpić', '.', '.', '.'], 2)
-(('9460_1', 0.6460520029067993, 1, 1), None, None, ('9460_1', 0.6460520029067993, 1, 1))
+# predict the sense of word with index 1 in the sentence from sents collection
+> predict_sense('wyjść', 'praet:sg:m1:perf', [l for (w, l, s, t) in sents[5]], 1):
+(('82941_czasownik_10', tensor(1.00000e-02 * [[ 4.7619]]), 21, 21), None, ('82939_czasownik_16', tensor(1.00000e-02 *
+[[ 7.6923]]), 21, 21), ('10303_czasownik_1', tensor([[ 0.1197]]), 21, 21), ('82931_czasownik_14', tensor(1.00000e-02 *
+[[ 4.7619]]), 21, 0), ('10303_czasownik_1', tensor([[ 0.1197]]), 21, 21))
 
-See below for explanation.
+The returned list contains predictions made with various neighbor subsets. See
+below, and the paper, for explanation.
 
 NOTE it is required to first call `add_word_neighborhoods` on words you wish to
 disambiguate. This retrieves necessary information from Wordnet XML. It is best,
 whenever possible, to call this function on all the words you'll want to process
 at once.
 
+Experim.py uses functions from `gibber.annot_corp_loader` which can import
+supported corpora and provide a list of sentences and a set of unique lemmas.
+These are:
+
+load_skladnica_wn2(skladnica_path, skladnica_sections_index_path):
+    """Returns a list of sentences, as list of lemmas, and a set of words.
+    The first has pairs: (form, lemma, true_sense, tag), the second:
+    (lemma, tag)"""
+load_wn3_corpus(annot_sentences_path)
+load_kpwr_corpus(kpwr_path)
+
+For meaning of the arguments consult wsd_config.py.
+
+
 Configuration
 -------------
 
-See the file wsd_config in this directory.
-
-nkjp_index_path - path to list of NKJP corpus directories, each in new line 
-                  (a list for NKJP1M provided in this package).
-nkjp_path - path to NKJP corpus, as downloadable from the corpus site.
-vecs_path - path to word vectors to be used in WSD model; downloadable from
-            http://dsmodels.nlp.ipipan.waw.pl/.
-pl_wordnet_file - path to Wordnet XML.
-
+See the file wsd_config in this directory. The comments there should contain
+necessary explanations.
 
 Conventions
 -----------
-Lemmas should be converted to lowercase.
+Forms and lemmas should be converted to lowercase.
 
 For referring to wordnet senses, we use a convention of symbols aaa_111, where
 aaa is the lexical id, and 111 is the variant number. If one of these is empty
 (as it is in the loaded sense-annotated data), it is enough for the other
-information to match. The `predict_senses` function will return full information.
+information to match. The `predict_senses` function will return full information,
+in the format aaa_POS_111, where POS is a POS type used in plWordnet.
+
+For comparing senses, the function `gibber.wsd.sense_match` can be used. It
+takes two arguments: the first should be a full sense specification, the
+second may be partial.
 
 Relation subsets
 ----------------
@@ -70,9 +88,10 @@ add_word_neighborhoods(words):
     in internal representation for later prediction."""
 
 def predict_sense(token_lemma, tag, sent, token_id, verbose=False, discriminate_POS=True):
-    """Get token_lemma and tag as strings, the whole sent as a sequence of strings, and token_id
-    indicating the index where the token is in the sentence. Return decisions made when using
-    subsets 1, 2, 3, 4 of relations as tuples (estimated probability, sense, retrieved_sense_count,
+    """Get token_lemma and tag as strings, the whole sent as a sequence of strings (forms or lemmas),
+    and token_id indicating the index where the token is in the sentence. Return decisions made when
+    using subsets 1, 2, 3, 4 of relations, as tuples (estimated probability, sense, retrieved_sense_count,
     considered_sense_count) or None's if no decision. Retrieved_sense_count indicates how many
     senses were found for the lemma, and considered_sense_count for how many we were able to find
-    a neighborhood with the given subset of relations."""
+    a neighborhood with the given subset of relations. If discriminate_POS is set, only senses
+    of Wordnet POS matching the provided tag will be considered."""
